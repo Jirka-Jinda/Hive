@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Scrollbar polish ────────────────────────────────── */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #374151;
+    /* gray-700 */
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #6366f1;
+    /* indigo-500 */
+}
+
+/* ── Base ────────────────────────────────────────────── */
+html,
+body,
+#root {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Drag handle — no text selection while resizing */
+.cursor-col-resize {
+    user-select: none;
+}
+
+/* ── xterm ───────────────────────────────────────────── */
+.xterm {
+    height: 100%;
+}
+
+.xterm-viewport {
+    overflow-y: hidden !important;
+}

@@ -1,0 +1,16 @@
+# Workspace
+node_modules/
+dist/
+
+# Backend data (SQLite DB, encrypted credentials, cloned repos)
+packages/backend/data/
+
+# Electron build output
+packages/electron/release/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db

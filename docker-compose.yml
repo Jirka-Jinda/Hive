@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    image: agent-workspace-manager:latest
+    container_name: agent-workspace
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist SQLite DB and encrypted credentials
+      - ./data:/data
+      # Optional: mount your local repos into the container
+      # - /path/to/your/projects:/projects:ro
+    environment:
+      PORT: "3000"
+      DATA_DIR: "/data"
+      # Set a strong password before deploying!
+      MASTER_PASSWORD: "${MASTER_PASSWORD:-change-me}"
+      NODE_ENV: "production"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# To add a reverse proxy (HTTPS + optional basic auth), add a Caddy or nginx service here.
+# See docs/reverse-proxy.md for a ready-to-use Caddy configuration.
