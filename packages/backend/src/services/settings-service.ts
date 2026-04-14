@@ -1,45 +1,50 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Config } from '../utils/config';
 
 export interface AppSettings {
   reposDir: string;
 }
 
-function settingsPath(): string {
-  return resolve(Config.DATA_DIR, 'settings.json');
+function envFilePath(): string {
+  return resolve(process.cwd(), '.env');
 }
 
-function defaults(): AppSettings {
-  return { reposDir: resolve(Config.REPOS_DIR) };
+function readEnvFile(): string {
+  const path = envFilePath();
+  return existsSync(path) ? readFileSync(path, 'utf-8') : '';
+}
+
+function writeEnvKey(key: string, value: string): void {
+  const path = envFilePath();
+  let content = readEnvFile();
+  const regex = new RegExp(`^${key}=.*$`, 'm');
+  const line = `${key}=${value}`;
+  if (regex.test(content)) {
+    content = content.replace(regex, line);
+  } else {
+    content = content.trimEnd() + '\n' + line + '\n';
+  }
+  writeFileSync(path, content, 'utf-8');
 }
 
 export class SettingsService {
-  private cache: AppSettings | null = null;
-
   load(): AppSettings {
-    if (this.cache) return this.cache;
-    const path = settingsPath();
-    if (!existsSync(path)) {
-      this.cache = defaults();
-      return this.cache;
-    }
-    try {
-      const raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<AppSettings>;
-      this.cache = { ...defaults(), ...raw };
-    } catch {
-      this.cache = defaults();
-    }
-    return this.cache;
+    return {
+      reposDir: resolve(process.env.REPOS_DIR ?? Config.REPOS_DIR),
+    };
   }
 
   save(patch: Partial<AppSettings>): AppSettings {
     const current = this.load();
     const next: AppSettings = { ...current, ...patch };
-    const path = settingsPath();
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(next, null, 2), 'utf-8');
-    this.cache = next;
+
+    if (patch.reposDir !== undefined) {
+      writeEnvKey('REPOS_DIR', patch.reposDir);
+      // Update the live process so the running server picks it up immediately
+      process.env.REPOS_DIR = patch.reposDir;
+    }
+
     return next;
   }
 }
