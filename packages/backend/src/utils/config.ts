@@ -1,4 +1,12 @@
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+import { resolve } from 'node:path';
+
+// __dirname is packages/backend/src/utils — go up 4 levels to project root
+const PROJECT_ROOT = resolve(__dirname, '../../../..');
+
+// Explicitly load .env from the project root so the path is correct regardless
+// of which directory npm uses as CWD when running workspace scripts
+dotenvConfig({ path: resolve(PROJECT_ROOT, '.env') });
 
 if (!process.env.MASTER_PASSWORD) {
   console.warn(
@@ -8,9 +16,10 @@ if (!process.env.MASTER_PASSWORD) {
 }
 
 export const Config = {
+  PROJECT_ROOT,
   PORT: parseInt(process.env.PORT ?? '3000', 10),
   DATA_DIR: process.env.DATA_DIR ?? './packages/backend/data',
-  /** Root folder where all managed repositories live. Clones go here; local-path picker lists from here. */
+  /** Root folder where all managed repositories live. Relative paths are resolved against PROJECT_ROOT. */
   REPOS_DIR: process.env.REPOS_DIR ?? './repos',
   MASTER_PASSWORD: process.env.MASTER_PASSWORD ?? '',
   NODE_ENV: process.env.NODE_ENV ?? 'development',

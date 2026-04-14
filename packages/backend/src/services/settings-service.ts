@@ -31,7 +31,8 @@ function writeEnvKey(key: string, value: string): void {
 export class SettingsService {
   load(): AppSettings {
     return {
-      reposDir: resolve(process.env.REPOS_DIR ?? Config.REPOS_DIR),
+      // Resolve relative to project root so './repos' → <root>/repos regardless of CWD
+      reposDir: resolve(Config.PROJECT_ROOT, process.env.REPOS_DIR ?? Config.REPOS_DIR),
     };
   }
 
