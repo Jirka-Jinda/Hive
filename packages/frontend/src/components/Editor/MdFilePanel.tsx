@@ -27,6 +27,8 @@ export default function MdFilePanel({ onCollapse }: Props) {
     const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
     const [deleting, setDeleting] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    const [dropContent, setDropContent] = useState<string | null>(null);
+    const [dragOverScope, setDragOverScope] = useState<'central' | 'repo' | null>(null);
 
     const centralFiles = sortByType(mdFiles.filter((f) => f.scope === 'central'));
     const repoFiles = sortByType(mdFiles.filter((f) => f.scope === 'repo'));
@@ -41,6 +43,45 @@ export default function MdFilePanel({ onCollapse }: Props) {
         setNewType('other');
         setErrorMsg('');
         setConfirmDeleteId(null);
+    };
+
+    const handleDragOver = (e: React.DragEvent, scope: 'central' | 'repo') => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOverScope(scope);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        // Only clear if leaving the section entirely (not entering a child)
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            setDragOverScope(null);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent, scope: 'central' | 'repo') => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOverScope(null);
+
+        const file = e.dataTransfer.files[0];
+        if (!file) return;
+
+        if (!file.name.endsWith('.md')) {
+            setErrorMsg('Only .md files can be dropped here.');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const content = (ev.target?.result as string) ?? '';
+            setDropContent(content);
+            setNewName(file.name);
+            setNewType('other');
+            setErrorMsg('');
+            setConfirmDeleteId(null);
+            setCreateForScope(scope);
+        };
+        reader.readAsText(file);
     };
 
     const openFile = async (file: MdFile) => {
@@ -73,11 +114,12 @@ export default function MdFilePanel({ onCollapse }: Props) {
         setCreating(true);
         try {
             setErrorMsg('');
+            const content = dropContent ?? `# ${newName.trim()}\n\n`;
             const file = await api.mdfiles.create({
                 scope: createForScope,
                 repoPath: createForScope === 'repo' ? selectedRepo?.path : undefined,
                 filename: newName.trim(),
-                content: `# ${newName.trim()}\n\n`,
+                content,
                 type: newType,
             });
             const full = await api.mdfiles.get(file.id);
@@ -85,6 +127,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
             setSelectedMdFile(full);
             setCreateForScope(null);
             setNewName('');
+            setDropContent(null);
         } catch (e: unknown) {
             setErrorMsg(e instanceof Error ? e.message : 'Failed to create file');
         } finally {
@@ -95,17 +138,24 @@ export default function MdFilePanel({ onCollapse }: Props) {
     // Called as a plain function (not a React component) to avoid remount on each render
     const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo') => {
         const isCreating = createForScope === scope;
+        const isDragOver = dragOverScope === scope;
         return (
-            <div key={scope} className="mb-3">
+            <div
+                key={scope}
+                className={`mb-3 rounded-lg transition-all ${isDragOver ? 'ring-2 ring-indigo-500/60 bg-indigo-950/30' : ''}`}
+                onDragOver={(e) => handleDragOver(e, scope)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, scope)}
+            >
                 <div className="flex items-center justify-between gap-2 px-2 mb-1">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                         {label}
                     </div>
                     <button
-                        onClick={() => isCreating ? setCreateForScope(null) : startCreate(scope)}
+                        onClick={() => { if (isCreating) { setCreateForScope(null); setDropContent(null); } else { startCreate(scope); } }}
                         className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${isCreating
-                                ? 'bg-indigo-600 border-indigo-500 text-white'
-                                : 'bg-gray-800 border-gray-700 text-indigo-400 hover:bg-gray-750 hover:text-indigo-300 hover:border-gray-600'
+                            ? 'bg-indigo-600 border-indigo-500 text-white'
+                            : 'bg-gray-800 border-gray-700 text-indigo-400 hover:bg-gray-750 hover:text-indigo-300 hover:border-gray-600'
                             }`}
                     >
                         {isCreating ? '\u2715' : '+ Add'}
@@ -143,8 +193,12 @@ export default function MdFilePanel({ onCollapse }: Props) {
                     </div>
                 )}
 
-                {files.length === 0 ? (
-                    <div className="text-xs text-gray-600 px-2 py-1 italic">Empty</div>
+                {files.length === 0 && !isDragOver ? (
+                    <div className="text-xs text-gray-600 px-2 py-1 italic">Empty — drop a .md file here</div>
+                ) : isDragOver ? (
+                    <div className="text-xs text-indigo-400 px-2 py-2 text-center border border-dashed border-indigo-500/60 rounded-md mx-1 mb-1">
+                        Drop to import .md file
+                    </div>
                 ) : (
                     files.map((f) => {
                         const isPendingDelete = confirmDeleteId === f.id;
@@ -153,10 +207,10 @@ export default function MdFilePanel({ onCollapse }: Props) {
                                 key={f.id}
                                 onClick={() => !isPendingDelete && openFile(f)}
                                 className={`group rounded-md cursor-pointer text-xs transition-all ${isPendingDelete
-                                        ? 'bg-gray-800'
-                                        : selectedMdFile?.id === f.id
-                                            ? 'bg-indigo-700/80 text-white'
-                                            : 'text-gray-300 hover:bg-gray-800'
+                                    ? 'bg-gray-800'
+                                    : selectedMdFile?.id === f.id
+                                        ? 'bg-indigo-700/80 text-white'
+                                        : 'text-gray-300 hover:bg-gray-800'
                                     }`}
                             >
                                 {isPendingDelete ? (
@@ -206,7 +260,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
     return (
         <div className="flex flex-col h-full bg-gray-900 border-l border-gray-800/80 w-full overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-gray-800/80 bg-gray-950/40 shrink-0">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">MD Files</span>
+                <span className="text-[11px] font-bold text-indigo-400 tracking-[0.12em] uppercase">MD Files</span>
                 <button
                     onClick={onCollapse}
                     title="Collapse panel"

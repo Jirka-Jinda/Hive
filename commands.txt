@@ -1,3 +1,0 @@
-npm run electron:dev          # start everything in dev mode (Vite HMR + Electron window)
-npm run electron:pack         # build + dry-run package (no installer, for testing)
-npm run electron:dist         # build full installer (.exe + portable) into packages/electron/release/

@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
+import PinSetup from '../Auth/PinSetup';
 
 interface Props {
     onClose: () => void;
 }
+
+type AuthView = 'idle' | 'setup' | 'change';
 
 export default function SettingsModal({ onClose }: Props) {
     const { settings, setSettings } = useAppStore();
@@ -12,6 +15,10 @@ export default function SettingsModal({ onClose }: Props) {
     const [saving, setSaving] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
     const [saved, setSaved] = useState(false);
+    const [authView, setAuthView] = useState<AuthView>('idle');
+    const [authSaving, setAuthSaving] = useState(false);
+
+    const authEnabled = settings?.auth?.enabled ?? false;
 
     const handleSave = async () => {
         if (!reposDir.trim()) return;
@@ -29,6 +36,32 @@ export default function SettingsModal({ onClose }: Props) {
         }
     };
 
+    const handleToggleAuth = async () => {
+        if (!authEnabled) {
+            // Enable: show PIN setup first
+            setAuthView('setup');
+        } else {
+            // Disable immediately
+            setAuthSaving(true);
+            try {
+                const updated = await api.settings.update({ auth: { enabled: false, pin: '' } });
+                setSettings(updated);
+            } catch { /* ignore */ }
+            setAuthSaving(false);
+        }
+    };
+
+    const handlePinConfirmed = async (pin: string) => {
+        const encoded = btoa(pin);
+        setAuthSaving(true);
+        try {
+            const updated = await api.settings.update({ auth: { enabled: true, pin: encoded } });
+            setSettings(updated);
+        } catch { /* ignore */ }
+        setAuthSaving(false);
+        setAuthView('idle');
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-md mx-4">
@@ -44,7 +77,8 @@ export default function SettingsModal({ onClose }: Props) {
                 </div>
 
                 {/* Body */}
-                <div className="p-4 space-y-4">
+                <div className="p-4 space-y-5">
+                    {/* Repos dir */}
                     <div className="space-y-1.5">
                         <label className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                             Repositories Folder
@@ -60,6 +94,43 @@ export default function SettingsModal({ onClose }: Props) {
                         <p className="text-[11px] text-gray-600">
                             All repositories will be cloned into this folder. The local-path picker also reads from here.
                         </p>
+                    </div>
+
+                    {/* Auth section */}
+                    <div className="space-y-3 pt-1 border-t border-gray-800">
+                        <div className="flex items-center justify-between pt-3">
+                            <div>
+                                <p className="text-xs font-semibold text-gray-300">PIN Lock</p>
+                                <p className="text-[11px] text-gray-600 mt-0.5">Require a 4-digit PIN on launch.</p>
+                            </div>
+                            <button
+                                onClick={handleToggleAuth}
+                                disabled={authSaving}
+                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 ${authEnabled ? 'bg-amber-500' : 'bg-gray-700'}`}
+                            >
+                                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${authEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                            </button>
+                        </div>
+
+                        {authEnabled && authView === 'idle' && (
+                            <button
+                                onClick={() => setAuthView('change')}
+                                className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-amber-400 hover:border-amber-500/40 font-medium transition-all"
+                            >
+                                Change PIN
+                            </button>
+                        )}
+
+                        {(authView === 'setup' || authView === 'change') && (
+                            <div className="bg-gray-950 border border-gray-700/60 rounded-lg p-4">
+                                <PinSetup
+                                    title={authView === 'change' ? 'New PIN' : 'Set a PIN'}
+                                    description={authView === 'change' ? 'Enter a new 4-digit PIN.' : 'Choose a 4-digit PIN to protect Hive.'}
+                                    onConfirm={handlePinConfirmed}
+                                    onCancel={() => setAuthView('idle')}
+                                />
+                            </div>
+                        )}
                     </div>
 
                     {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}

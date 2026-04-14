@@ -34,7 +34,8 @@ export function reposRouter(db: Database.Database, mdMgr: MdFileManager, setting
 
   app.delete('/:id', (c) => {
     try {
-      workspace.deleteRepo(parseInt(c.req.param('id'), 10));
+      const deleteFromDisk = c.req.query('deleteFromDisk') === 'true';
+      workspace.deleteRepo(parseInt(c.req.param('id'), 10), deleteFromDisk);
       return c.json({ ok: true });
     } catch (error: unknown) {
       return c.json({ error: getErrorMessage(error) }, 404);

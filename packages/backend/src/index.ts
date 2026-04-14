@@ -12,9 +12,21 @@ import { credentialsRouter } from './routes/credentials';
 import { agentsRouter } from './routes/agents';
 import { mdfilesRouter } from './routes/mdfiles';
 import { settingsRouter } from './routes/settings';
+import { pipelineRouter } from './routes/pipeline';
 import { setupWebSocketServer } from './ws/terminal';
+import { setupShellServer } from './ws/shell';
+import { setupNotifyServer } from './ws/notify';
+import { WebSocketServer } from 'ws';
+import type { IncomingMessage } from 'node:http';
+import type { Socket } from 'node:net';
 import { MdFileManager } from './services/mdfile-manager';
+import { MdRefService } from './services/md-ref-service';
 import { SettingsService } from './services/settings-service';
+import { NotificationBus } from './services/notification-bus';
+import { PipelineRegistry } from './pipeline/pipeline-registry';
+import { createMdContextNode } from './pipeline/nodes/md-context.node';
+import { createSessionStateWatcherNode } from './pipeline/nodes/session-state-watcher.node';
+import { SessionStore } from './services/session-store';
 import { join as pathJoin } from 'node:path';
 import { WorkspaceService } from './application/workspace-service';
 
@@ -24,7 +36,14 @@ migrate(db);
 const settingsService = new SettingsService();
 const mdMgr = new MdFileManager(db);
 const workspace = new WorkspaceService(db, mdMgr, settingsService);
-workspace.hydrateRepoArtifacts();
+
+// ── Pipeline ───────────────────────────────────────────────────────────────
+const notificationBus = new NotificationBus();
+const sessionStore = new SessionStore(db);
+const mdRefService = new MdRefService(db);
+const pipelineRegistry = new PipelineRegistry(settingsService);
+pipelineRegistry.register(createMdContextNode(mdRefService));
+pipelineRegistry.register(createSessionStateWatcherNode(sessionStore, notificationBus));
 
 // ── Hono app ───────────────────────────────────────────────────────────────
 const app = new Hono();
@@ -47,6 +66,7 @@ app.route('/api/credentials', credentialsRouter(db));
 app.route('/api/agents', agentsRouter());
 app.route('/api/mdfiles', mdfilesRouter(db, mdMgr));
 app.route('/api/settings', settingsRouter(settingsService));
+app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
 
 // Static frontend (production only)
 if (Config.NODE_ENV === 'production') {
@@ -62,12 +82,36 @@ if (Config.NODE_ENV === 'production') {
   });
 }
 
-// ── Server ─────────────────────────────────────────────────────────────────
+// ── WebSocket servers ──────────────────────────────────────────────────────
+// Use noServer:true for both so a single 'upgrade' handler can route by path.
+// Using two WebSocketServers that each own the server's upgrade event causes
+// the first one to destroy sockets whose path it doesn't recognise, preventing
+// the second WSS from ever receiving connections.
 const server = createAdaptorServer({ fetch: app.fetch });
-setupWebSocketServer(server, db);
+
+const termWss = new WebSocketServer({ noServer: true });
+const shellWss = new WebSocketServer({ noServer: true });
+const notifyWss = new WebSocketServer({ noServer: true });
+
+setupWebSocketServer(termWss, db, settingsService, pipelineRegistry, notificationBus);
+setupShellServer(shellWss);
+setupNotifyServer(notifyWss, notificationBus);
+
+server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
+  const pathname = new URL(req.url ?? '', 'http://localhost').pathname;
+  if (pathname === '/ws/terminal') {
+    termWss.handleUpgrade(req, socket, head, (ws) => termWss.emit('connection', ws, req));
+  } else if (pathname === '/ws/shell') {
+    shellWss.handleUpgrade(req, socket, head, (ws) => shellWss.emit('connection', ws, req));
+  } else if (pathname === '/ws/notify') {
+    notifyWss.handleUpgrade(req, socket, head, (ws) => notifyWss.emit('connection', ws, req));
+  } else {
+    socket.destroy();
+  }
+});
 
 server.listen(Config.PORT, () => {
-  console.log(`[INFO] AI Workspace Manager running on http://localhost:${Config.PORT}`);
+  console.log(`[INFO] Hive running on http://localhost:${Config.PORT}`);
   console.log(`[INFO] Environment: ${Config.NODE_ENV}`);
   console.log(`[INFO] Data directory: ${Config.DATA_DIR}`);
 });

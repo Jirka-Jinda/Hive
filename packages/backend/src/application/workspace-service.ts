@@ -22,12 +22,6 @@ export class WorkspaceService {
     this.credentialStore = new CredentialStore(db);
   }
 
-  hydrateRepoArtifacts(): void {
-    for (const repo of this.repoManager.list()) {
-      this.mdFileManager.watchRepo(repo.id, repo.path);
-    }
-  }
-
   listRepos() {
     return this.repoManager.list();
   }
@@ -50,18 +44,20 @@ export class WorkspaceService {
       throw new Error('path or gitUrl is required');
     }
 
-    this.mdFileManager.watchRepo(repo.id, repo.path);
     return repo;
   }
 
-  deleteRepo(id: number): void {
+  deleteRepo(id: number, deleteFromDisk = false): void {
     this.repoManager.get(id);
     const sessions = this.sessionStore.list(id);
     for (const session of sessions) {
       killProcess(session.id);
     }
-    this.mdFileManager.unwatchRepo(id);
-    this.repoManager.delete(id);
+    if (deleteFromDisk) {
+      this.repoManager.deleteFromDisk(id);
+    } else {
+      this.repoManager.delete(id);
+    }
   }
 
   listSessions(repoId: number) {

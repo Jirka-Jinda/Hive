@@ -4,10 +4,14 @@ import { api } from '../../api/client';
 import RepoList from '../Sidebar/RepoList';
 import SessionList from '../Sidebar/SessionList';
 import TerminalView from '../Terminal/TerminalView';
+import ShellTerminal from '../Terminal/ShellTerminal';
 import MdEditor from '../Editor/MdEditor';
 import MdFilePanel from '../Editor/MdFilePanel';
 import CredentialsModal from './CredentialsModal';
 import SettingsModal from './SettingsModal';
+import PipelineModal from './PipelineModal';
+import { ToastContainer } from './ToastContainer';
+import { useNotifications } from '../../hooks/useNotifications';
 
 /** Drag-to-resize hook */
 function useDragResize(initial: number, min: number, max: number, side: 'right' | 'left' = 'right') {
@@ -46,10 +50,13 @@ function useDragResize(initial: number, min: number, max: number, side: 'right' 
 }
 
 export default function AppShell() {
-    const { setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, selectedSession, selectedMdFile } = useAppStore();
+    const { setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, selectedSession, selectedMdFile, sessions, setSelectedSession, settings, lock } = useAppStore();
+
+    useNotifications();
 
     const [showCredentials, setShowCredentials] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
+    const [showPipeline, setShowPipeline] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -101,14 +108,37 @@ export default function AppShell() {
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (event.key !== 'F11') return;
-            event.preventDefault();
-            void toggleFullscreen();
+            if (event.key === 'F11') {
+                event.preventDefault();
+                void toggleFullscreen();
+                return;
+            }
+            // Ctrl+Shift+Tab — cycle to next idle session
+            if (event.key === 'Tab' && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey) {
+                event.preventDefault();
+                const idleSessions = sessions.filter((s) => s.state === 'idle');
+                if (idleSessions.length > 0) {
+                    const currentIdx = idleSessions.findIndex((s) => s.id === selectedSession?.id);
+                    const next = idleSessions[(currentIdx + 1) % idleSessions.length];
+                    setSelectedSession(next);
+                    setActiveView('terminal');
+                }
+                return;
+            }
+            // Ctrl+` cycles between terminal and editor (Ctrl+` won't be captured by xterm)
+            if (event.key === '`' && event.ctrlKey && !event.altKey && !event.metaKey) {
+                event.preventDefault();
+                if (activeView === 'terminal' && selectedMdFile) {
+                    setActiveView('editor');
+                } else if (activeView === 'editor') {
+                    setActiveView('terminal');
+                }
+            }
         };
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [toggleFullscreen]);
+    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession]);
 
     // ── Shared button class strings ───────────────────────────────────────────
     const iconBtnBase = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-all font-medium';
@@ -119,14 +149,41 @@ export default function AppShell() {
     return (
         <div className="flex h-screen flex-col bg-gray-950 text-gray-100 overflow-hidden">
             <header className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-4 py-2.5 border-b border-gray-800/80 bg-gray-950/40 shrink-0">
-                <div className="min-w-0">
-                    <h1 className="truncate text-sm font-semibold text-gray-100 tracking-[0.08em] uppercase">
-                        AI Workspace Manager
-                    </h1>
-                </div>
-
+                <div className="min-w-0" />
                 <div className="flex items-center justify-center">
                     <div className="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-900/90 px-3 py-1.5 shadow-sm shadow-black/20">
+                        {/* ── View toggle: Terminal / Editor ── */}
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setActiveView('terminal')}
+                                title="Terminal view (Ctrl+`)"
+                                className={`${iconBtnBase} ${activeView === 'terminal'
+                                    ? 'bg-indigo-600/90 border-indigo-500 text-white shadow-sm shadow-indigo-950/60'
+                                    : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={() => { if (selectedMdFile) setActiveView('editor'); }}
+                                title={selectedMdFile ? 'Editor view (Ctrl+`)' : 'Open an MD file to use editor view'}
+                                className={`${iconBtnBase} ${activeView === 'editor'
+                                    ? 'bg-indigo-600/90 border-indigo-500 text-white shadow-sm shadow-indigo-950/60'
+                                    : selectedMdFile
+                                        ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                        : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="w-px h-6 bg-gray-700/80" />
+
                         <div className="flex items-center gap-1">
                             <button
                                 onClick={() => setShowCredentials(true)}
@@ -147,11 +204,31 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                                 </svg>
                             </button>
+                            <button
+                                onClick={() => setShowPipeline(true)}
+                                title="Prompt Pipeline"
+                                className={iconBtnDefault}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
+                                </svg>
+                            </button>
                         </div>
 
                         <div className="w-px h-6 bg-gray-700/80" />
 
                         <div className="flex items-center gap-1">
+                            {settings?.auth?.enabled && (
+                                <button
+                                    onClick={lock}
+                                    title="Lock"
+                                    className={iconBtnDefault}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                </button>
+                            )}
                             <button
                                 onClick={() => void toggleFullscreen()}
                                 title={isFullscreen ? 'Exit fullscreen (F11)' : 'Enter fullscreen (F11)'}
@@ -222,24 +299,17 @@ export default function AppShell() {
                 {/* ── Main area ── */}
                 <div className="flex-1 flex overflow-hidden min-w-0">
                     <div className="flex-1 flex overflow-hidden min-w-0">
-                        {activeView === 'terminal' && selectedSession ? (
+                        {/* Shell terminal — always mounted to keep PTY alive; hidden when a session or editor is active */}
+                        <ShellTerminal hidden={activeView !== 'terminal' || selectedSession !== null} />
+
+                        {/* Session terminal — overlays the shell when a session is selected */}
+                        {activeView === 'terminal' && selectedSession && (
                             <TerminalView key={selectedSession.id} sessionId={selectedSession.id} />
-                        ) : activeView === 'editor' && selectedMdFile ? (
+                        )}
+
+                        {/* MD editor — shown only when editor view and a file is open */}
+                        {activeView === 'editor' && selectedMdFile && (
                             <MdEditor />
-                        ) : (
-                            <div className="flex-1 flex items-center justify-center">
-                                <div className="text-center space-y-3 select-none">
-                                    <div className="w-12 h-12 mx-auto rounded-xl bg-gray-800 border border-gray-700 flex items-center justify-center">
-                                        <svg className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
-                                        </svg>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-medium text-gray-500">No active view</p>
-                                        <p className="text-xs text-gray-600 mt-0.5">Select a session or open an .md file</p>
-                                    </div>
-                                </div>
-                            </div>
                         )}
                     </div>
 
@@ -268,6 +338,8 @@ export default function AppShell() {
 
             {showCredentials && <CredentialsModal onClose={() => setShowCredentials(false)} />}
             {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+            {showPipeline && <PipelineModal onClose={() => setShowPipeline(false)} />}
+            <ToastContainer />
         </div>
     );
 }

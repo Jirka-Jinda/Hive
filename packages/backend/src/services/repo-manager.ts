@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import type Database from 'better-sqlite3';
@@ -44,10 +44,16 @@ export class RepoManager {
   }
 
   async addGit(gitUrl: string, name?: string): Promise<Repo> {
-    const repoName = name?.trim() || gitUrl.split('/').pop()?.replace(/\.git$/, '') || 'repo';
+    const baseName = name?.trim() || gitUrl.split('/').pop()?.replace(/\.git$/, '') || 'repo';
     const reposDir = resolve(this.settings.load().reposDir);
     mkdirSync(reposDir, { recursive: true });
-    const cloneDir = resolve(reposDir, repoName);
+    // Ensure unique clone directory
+    let cloneDir = resolve(reposDir, baseName);
+    let counter = 1;
+    while (existsSync(cloneDir)) {
+      cloneDir = resolve(reposDir, `${baseName}-${counter++}`);
+    }
+    const repoName = cloneDir.split(/[/\\]/).pop()!;
     await simpleGit().clone(gitUrl, cloneDir);
     const result = this.db
       .prepare('INSERT INTO repos (name, path, source, git_url) VALUES (?, ?, ?, ?)')
@@ -70,5 +76,13 @@ export class RepoManager {
   delete(id: number): void {
     const result = this.db.prepare('DELETE FROM repos WHERE id = ?').run(id);
     if (result.changes === 0) throw new Error(`Repo ${id} not found`);
+  }
+
+  deleteFromDisk(id: number): void {
+    const repo = this.get(id);
+    this.delete(id);
+    if (existsSync(repo.path)) {
+      rmSync(repo.path, { recursive: true, force: true });
+    }
   }
 }

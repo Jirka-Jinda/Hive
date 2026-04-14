@@ -21,6 +21,7 @@ export default function TerminalView({ sessionId }: Props) {
         if (!containerRef.current) return;
 
         const term = new Terminal({
+            allowProposedApi: true,
             theme: {
                 background: '#030712',
                 foreground: '#f3f4f6',

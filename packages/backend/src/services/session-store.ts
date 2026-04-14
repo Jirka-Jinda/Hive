@@ -7,6 +7,7 @@ export interface Session {
   credential_id: number | null;
   name: string;
   status: 'running' | 'stopped';
+  state: 'working' | 'idle' | 'stopped';
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +38,12 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?")
       .run(status, id);
+  }
+
+  setState(id: number, state: 'working' | 'idle' | 'stopped'): void {
+    this.db
+      .prepare("UPDATE sessions SET state = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(state, id);
   }
 
   appendLog(sessionId: number, output: Buffer): void {

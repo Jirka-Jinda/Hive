@@ -23,6 +23,7 @@ export default function RepoList() {
     const [repoRefs, setRepoRefs] = useState<import('../../api/client').MdFile[]>([]);
     const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
     const [removing, setRemoving] = useState(false);
+    const [deleteFromDisk, setDeleteFromDisk] = useState(false);
 
     // Fetch discovered repos whenever the local-path tab is active and form is open
     useEffect(() => {
@@ -98,7 +99,7 @@ export default function RepoList() {
         setRemoving(true);
         setErrorMsg('');
         try {
-            await api.repos.delete(id);
+            await api.repos.delete(id, deleteFromDisk);
             setRepos(repos.filter((r) => r.id !== id));
             if (selectedRepo?.id === id) setSelectedRepo(null);
         } catch (e: unknown) {
@@ -106,6 +107,7 @@ export default function RepoList() {
         } finally {
             setRemoving(false);
             setConfirmRemoveId(null);
+            setDeleteFromDisk(false);
         }
     };
 
@@ -171,8 +173,8 @@ export default function RepoList() {
                                     key={d.path}
                                     onClick={() => setSelectedPath(d.path === selectedPath ? '' : d.path)}
                                     className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-xs transition-all ${selectedPath === d.path
-                                            ? 'bg-indigo-700 text-white'
-                                            : 'text-gray-300 hover:bg-gray-700'
+                                        ? 'bg-indigo-700 text-white'
+                                        : 'text-gray-300 hover:bg-gray-700'
                                         }`}
                                 >
                                     <span className="text-gray-400 shrink-0">◈</span>
@@ -243,21 +245,32 @@ export default function RepoList() {
                             <div className="flex items-center justify-between px-2 py-1.5">
                                 {isPendingRemove ? (
                                     <>
-                                        <span className="text-xs text-gray-300 truncate">Remove {repo.name}?</span>
-                                        <div className="flex gap-1 shrink-0 ml-1">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); void removeRepo(repo.id); }}
-                                                disabled={removing}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
-                                            >
-                                                {removing ? '…' : 'Yes'}
-                                            </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); setConfirmRemoveId(null); }}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
-                                            >
-                                                No
-                                            </button>
+                                        <div className="flex flex-col gap-1 w-full">
+                                            <span className="text-xs text-gray-300 truncate">Remove {repo.name}?</span>
+                                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={deleteFromDisk}
+                                                    onChange={(e) => setDeleteFromDisk(e.target.checked)}
+                                                    className="w-3 h-3 accent-red-500"
+                                                />
+                                                <span className="text-[10px] text-gray-400">Also delete from disk</span>
+                                            </label>
+                                            <div className="flex gap-1">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); void removeRepo(repo.id); }}
+                                                    disabled={removing}
+                                                    className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
+                                                >
+                                                    {removing ? '…' : 'Yes'}
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setConfirmRemoveId(null); setDeleteFromDisk(false); }}
+                                                    className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
+                                                >
+                                                    No
+                                                </button>
+                                            </div>
                                         </div>
                                     </>
                                 ) : (

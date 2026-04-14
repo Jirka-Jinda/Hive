@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS md_files (
   repo_id    INTEGER REFERENCES repos(id) ON DELETE CASCADE,
   path       TEXT    NOT NULL,
   type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','other')),
+  content    TEXT    NOT NULL DEFAULT '',
   created_at TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE(scope, path)

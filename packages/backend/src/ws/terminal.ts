@@ -1,21 +1,26 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import type { IncomingMessage, Server } from 'node:http';
-import type { ServerType } from '@hono/node-server/dist/types';
+import type { IncomingMessage } from 'node:http';
 import type Database from 'better-sqlite3';
 import { SessionStore } from '../services/session-store';
 import { RepoManager } from '../services/repo-manager';
 import { CredentialStore } from '../services/credential-store';
-import { MdRefService } from '../services/md-ref-service';
+import type { SettingsService } from '../services/settings-service';
+import type { PipelineRegistry } from '../pipeline/pipeline-registry';
+import type { NotificationBus } from '../services/notification-bus';
 import { spawnAgent, getProcess } from '../services/process-manager';
 import { AGENT_ADAPTERS } from '../services/agents';
 import { getErrorMessage } from '../utils/errors';
 
-export function setupWebSocketServer(server: ServerType, db: Database.Database): void {
-  const wss = new WebSocketServer({ server: server as Server, path: '/ws/terminal' });
+export function setupWebSocketServer(
+  wss: WebSocketServer,
+  db: Database.Database,
+  settingsService: SettingsService,
+  pipelineRegistry: PipelineRegistry,
+  notificationBus: NotificationBus,
+): void {
   const sessionStore = new SessionStore(db);
-  const repoManager = new RepoManager(db);
+  const repoManager = new RepoManager(db, settingsService);
   const credentialStore = new CredentialStore(db);
-  const mdRefService = new MdRefService(db);
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '', 'http://localhost');
@@ -61,35 +66,39 @@ export function setupWebSocketServer(server: ServerType, db: Database.Database):
       }
       entry = spawnAgent(sessionId, adapter, repo.path, credential);
       sessionStore.setStatus(sessionId, 'running');
+      sessionStore.setState(sessionId, 'working');
+      notificationBus.emitSessionState({ sessionId, state: 'working', sessionName: session.name });
 
-      // Inject linked MD file contents as a context preamble typed into the PTY.
+      // Run the session-start pipeline (e.g. injects MD file context preamble).
       // We wait briefly so the CLI can initialise its prompt before receiving input.
-      const resolved = mdRefService.resolveSessionContext(sessionId, session.repo_id);
-      const preamble = mdRefService.buildPreamble(resolved);
-      if (preamble) {
-        setTimeout(() => {
-          const proc = getProcess(sessionId);
-          if (proc) proc.pty.write(preamble);
-        }, 350);
-      }
+      void pipelineRegistry.run('session-start', '', { sessionId, repoId: session.repo_id }).then((startup) => {
+        if (startup) {
+          setTimeout(() => {
+            const proc = getProcess(sessionId);
+            if (proc) proc.pty.write(startup);
+          }, 350);
+        }
+      });
     }
 
-    // PTY data → WebSocket (and persist to DB for replay)
+    // PTY data → WebSocket (persist raw; pipeline may transform the live display)
     const onData = (data: Buffer) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-        sessionStore.appendLog(sessionId, data);
-      }
+      sessionStore.appendLog(sessionId, data);
+      void pipelineRegistry.run('agent-output', data.toString(), { sessionId, repoId: session.repo_id }).then((transformed) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from(transformed));
+      });
     };
     entry.events.on('data', onData);
 
     const onExit = () => {
       sessionStore.setStatus(sessionId, 'stopped');
+      sessionStore.setState(sessionId, 'stopped');
+      notificationBus.emitSessionState({ sessionId, state: 'stopped', sessionName: session.name });
       if (ws.readyState === WebSocket.OPEN) ws.close(1000, 'Process exited');
     };
     entry.events.once('exit', onExit);
 
-    // WebSocket input → PTY
+    // WebSocket input → PTY (pass through user-input pipeline first)
     ws.on('message', (msg: Buffer | string) => {
       const raw = msg instanceof Buffer ? msg : Buffer.from(msg as unknown as string);
       // Attempt to parse resize control message
@@ -102,7 +111,9 @@ export function setupWebSocketServer(server: ServerType, db: Database.Database):
       } catch {
         // Not JSON — treat as terminal input
       }
-      entry!.pty.write(raw.toString());
+      void pipelineRegistry.run('user-input', raw.toString(), { sessionId, repoId: session.repo_id }).then((transformed) => {
+        entry!.pty.write(transformed);
+      });
     });
 
     ws.on('close', () => {

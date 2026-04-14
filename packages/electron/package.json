@@ -1,8 +1,8 @@
 {
     "name": "@aw/electron",
     "version": "0.1.0",
-    "description": "Electron wrapper for AI Workspace Manager",
-    "author": "AI Workspace Manager",
+    "description": "Electron wrapper for Hive",
+    "author": "Hive",
     "main": "dist/main.js",
     "scripts": {
         "build": "tsc",
@@ -23,11 +23,13 @@
         "@types/node": "^22.14.0",
         "electron": "34.5.8",
         "electron-builder": "24.13.3",
+        "png-to-ico": "^3.0.1",
+        "sharp": "^0.34.5",
         "typescript": "^5.8.3"
     },
     "build": {
-        "appId": "com.aiworkspace.manager",
-        "productName": "AI Workspace Manager",
+        "appId": "com.hive.app",
+        "productName": "Hive",
         "copyright": "Copyright © 2026",
         "electronVersion": "34.5.8",
         "asar": false,
@@ -97,9 +99,9 @@
         },
         "protocols": [
             {
-                "name": "AI Workspace Manager",
+                "name": "Hive",
                 "schemes": [
-                    "ai-workspace"
+                    "hive"
                 ]
             }
         ]

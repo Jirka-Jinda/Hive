@@ -1,5 +1,22 @@
+export interface AuthSettings {
+  enabled: boolean;
+  /** Base64-encoded 4-digit PIN */
+  pin: string;
+}
+
 export interface AppSettings {
   reposDir: string;
+  auth: AuthSettings;
+}
+
+export type PipelinePhase = 'session-start' | 'user-input' | 'agent-output';
+
+export interface PipelineNodeDto {
+  id: string;
+  name: string;
+  description: string;
+  phases: PipelinePhase[];
+  enabled: boolean;
 }
 
 // Shared types mirroring backend DB models
@@ -19,6 +36,7 @@ export interface Session {
   credential_id: number | null;
   name: string;
   status: 'running' | 'stopped';
+  state: 'working' | 'idle' | 'stopped';
   created_at: string;
   updated_at: string;
 }
@@ -67,8 +85,8 @@ export const api = {
     discover: () => request<{ name: string; path: string }[]>('/repos/discovered'),
     create: (body: { path?: string; gitUrl?: string; name?: string }) =>
       request<Repo>('/repos', { method: 'POST', body: JSON.stringify(body) }),
-    delete: (id: number) =>
-      request<{ ok: boolean }>(`/repos/${id}`, { method: 'DELETE' }),
+    delete: (id: number, deleteFromDisk = false) =>
+      request<{ ok: boolean }>(`/repos/${id}?deleteFromDisk=${deleteFromDisk}`, { method: 'DELETE' }),
 
     sessions: {
       list: (repoId: number) => request<Session[]>(`/repos/${repoId}/sessions`),
@@ -139,5 +157,11 @@ export const api = {
     get: () => request<AppSettings>('/settings'),
     update: (body: Partial<AppSettings>) =>
       request<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) }),
+  },
+
+  pipeline: {
+    list: () => request<PipelineNodeDto[]>('/pipeline'),
+    setEnabled: (id: string, enabled: boolean) =>
+      request<PipelineNodeDto[]>(`/pipeline/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
   },
 };

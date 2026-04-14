@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, it, expect, vi } from 'vitest';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // ── Hoist setup BEFORE vi.mock factories run ──────────────────────────────
@@ -15,6 +15,8 @@ const { TEST_DATA_DIR } = vi.hoisted(() => {
 vi.mock('../utils/config', () => ({
   Config: {
     DATA_DIR: TEST_DATA_DIR,
+    PROJECT_ROOT: TEST_DATA_DIR,
+    REPOS_DIR: './repos',
     MASTER_PASSWORD: 'test-master-password-1234',
     PORT: 3001,
     NODE_ENV: 'test',
@@ -31,7 +33,7 @@ import { credentialsRouter } from '../routes/credentials';
 import { agentsRouter } from '../routes/agents';
 import { mdfilesRouter } from '../routes/mdfiles';
 import { MdFileManager } from '../services/mdfile-manager';
-import { writeFileSync } from 'node:fs';
+import { SettingsService } from '../services/settings-service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -41,12 +43,13 @@ function makeTestApp() {
   db.pragma('foreign_keys = ON');
   migrate(db);
   const mdMgr = new MdFileManager(db);
+  const settingsService = new SettingsService();
 
   const app = new Hono();
   app.get('/api/health', (c) =>
     c.json({ status: 'ok', timestamp: new Date().toISOString() })
   );
-  app.route('/api/repos', reposRouter(db, mdMgr));
+  app.route('/api/repos', reposRouter(db, mdMgr, settingsService));
   app.route('/api/credentials', credentialsRouter(db));
   app.route('/api/agents', agentsRouter());
   app.route('/api/mdfiles', mdfilesRouter(db, mdMgr));
@@ -64,23 +67,6 @@ async function req(
     init.headers = { 'Content-Type': 'application/json' };
   }
   return app.request(`http://localhost${path}`, init);
-}
-
-async function waitFor(assertion: () => Promise<void> | void, timeoutMs = 1500) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError: unknown;
-
-  while (Date.now() < deadline) {
-    try {
-      await assertion();
-      return;
-    } catch (error: unknown) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
-
-  throw lastError ?? new Error('Condition was not met before timeout');
 }
 
 // ── Shared test instance ──────────────────────────────────────────────────
@@ -385,12 +371,11 @@ describe('Credentials API', () => {
 describe('MD Files API', () => {
   let fileId = 0;
   let repoId = 0;
+  let repoPath = '';
 
   beforeAll(async () => {
-    const repoPath = join(TEST_DATA_DIR, 'md-repo');
-    const aiPath = join(repoPath, '.ai');
-    mkdirSync(aiPath, { recursive: true });
-    writeFileSync(join(aiPath, 'repo-notes.md'), '# Repo Notes', 'utf8');
+    repoPath = join(TEST_DATA_DIR, 'md-repo');
+    mkdirSync(repoPath, { recursive: true });
 
     const res = await req(app, '/api/repos', {
       method: 'POST',
@@ -440,13 +425,18 @@ describe('MD Files API', () => {
     expect(files.every((f: { scope: string }) => f.scope === 'central')).toBe(true);
   });
 
-  it('GET /api/mdfiles?scope=repo&repoId=:id — includes repo files discovered from .ai', async () => {
-    await waitFor(async () => {
-      const res = await req(app, `/api/mdfiles?scope=repo&repoId=${repoId}`);
-      expect(res.status).toBe(200);
-      const files = await res.json();
-      expect(files.some((file: { path: string }) => file.path.endsWith('repo-notes.md'))).toBe(true);
+  it('GET /api/mdfiles?scope=repo&repoId=:id — includes repo files created via API', async () => {
+    // Create a repo-scoped file via the API
+    const createRes = await req(app, '/api/mdfiles', {
+      method: 'POST',
+      body: { scope: 'repo', repoPath, filename: 'repo-notes.md', content: '# Repo Notes', type: 'other' },
     });
+    expect(createRes.status).toBe(201);
+
+    const res = await req(app, `/api/mdfiles?scope=repo&repoId=${repoId}`);
+    expect(res.status).toBe(200);
+    const files = await res.json();
+    expect(files.some((file: { path: string }) => file.path.endsWith('repo-notes.md'))).toBe(true);
   });
 
   it('PUT /api/mdfiles/:id — updates content on disk and DB', async () => {

@@ -135,8 +135,17 @@ export default function SessionList() {
             {!showNew && errorMsg && <p className="px-2 pb-2 text-xs text-red-400">{errorMsg}</p>}
 
             <ul className="space-y-0.5">
-                {sessions.map((session: Session) => {
+                {[...sessions].sort((a, b) => {
+                    const order = { idle: 0, working: 1, stopped: 2 } as Record<string, number>;
+                    return (order[a.state ?? 'stopped'] ?? 2) - (order[b.state ?? 'stopped'] ?? 2);
+                }).map((session: Session) => {
                     const isActive = selectedSession?.id === session.id;
+                    const dotClass =
+                        session.state === 'idle'
+                            ? 'bg-green-400'
+                            : session.state === 'working'
+                                ? 'bg-amber-400 animate-pulse'
+                                : 'bg-gray-500';
                     return (
                         <li
                             key={session.id}
@@ -170,8 +179,7 @@ export default function SessionList() {
                                     <>
                                         <div className="flex items-center gap-1.5 min-w-0">
                                             <span
-                                                className={`w-2 h-2 rounded-full shrink-0 ${session.status === 'running' ? 'bg-green-400' : 'bg-gray-500'
-                                                    }`}
+                                                className={`w-2 h-2 rounded-full shrink-0 ${dotClass}`}
                                             />
                                             <span className="truncate">{session.name}</span>
                                             <span className="text-xs text-gray-500 shrink-0">{session.agent_type}</span>

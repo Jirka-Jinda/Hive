@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { MdFile } from './mdfile-manager';
@@ -93,11 +92,11 @@ export class MdRefService {
 
     const result: ResolvedMdFile[] = [];
     for (const file of resolved.values()) {
-      try {
-        const content = readFileSync(file.path, 'utf8');
-        result.push({ file, content });
-      } catch {
-        // Skip files that can't be read (deleted from disk, etc.)
+      const row = this.db
+        .prepare('SELECT content FROM md_files WHERE id = ?')
+        .get(file.id) as { content: string } | undefined;
+      if (row !== undefined) {
+        result.push({ file, content: row.content });
       }
     }
     return result;

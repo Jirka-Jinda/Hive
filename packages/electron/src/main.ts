@@ -3,7 +3,10 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
+  nativeImage,
   shell,
+  Tray,
   utilityProcess,
   UtilityProcess,
 } from 'electron';
@@ -66,6 +69,7 @@ async function waitForBackend(port: number, attempts = 40): Promise<void> {
 let mainWindow: BrowserWindow | null = null;
 let backend: UtilityProcess | null = null;
 let backendPort = 3000;
+let tray: Tray | null = null;
 
 // Flag to distinguish user-initiated quit from unexpected backend crash
 let appIsQuitting = false;
@@ -92,6 +96,44 @@ async function setWindowFullscreen(window: BrowserWindow, nextState: boolean): P
 function bindWindowEvents(window: BrowserWindow): void {
   window.on('enter-full-screen', () => sendFullscreenState(window));
   window.on('leave-full-screen', () => sendFullscreenState(window));
+  // Intercept close: hide to tray instead of quitting
+  window.on('close', (event) => {
+    if (!appIsQuitting) {
+      event.preventDefault();
+      window.hide();
+    }
+  });
+}
+
+function setupTray(): void {
+  const iconPath = path.join(__dirname, '..', 'assets', 'icon.ico');
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip('Hive');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Hive',
+      click: () => {
+        mainWindow?.show();
+        mainWindow?.focus();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        appIsQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(contextMenu);
+
+  tray.on('double-click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
 }
 
 // ── Backend lifecycle ──────────────────────────────────────────────────────
@@ -178,7 +220,8 @@ async function createWindow(port: number): Promise<void> {
       webSecurity: true,
     },
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    title: 'AI Workspace Manager',
+    title: 'Hive',
+    icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
   });
   bindWindowEvents(mainWindow);
 
@@ -224,7 +267,8 @@ async function startDev(): Promise<void> {
       contextIsolation: true,
       nodeIntegration: false,
     },
-    title: 'AI Workspace Manager [dev]',
+    title: 'Hive [dev]',
+    icon: path.join(__dirname, '..', 'assets', 'icon.ico'),
   });
   bindWindowEvents(mainWindow);
 
@@ -258,6 +302,7 @@ ipcMain.handle('window:toggle-fullscreen', (event) => {
 
 app.on('ready', async () => {
   try {
+    setupTray();
     if (isDev) {
       await startDev();
     } else {
@@ -273,11 +318,16 @@ app.on('ready', async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Window is hidden to tray on close — never quit from this event.
+  // Quit is triggered exclusively via the tray context menu or app.quit().
 });
 
 app.on('activate', async () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (mainWindow) {
+    // Window exists but may be hidden — just bring it forward
+    mainWindow.show();
+    mainWindow.focus();
+  } else if (BrowserWindow.getAllWindows().length === 0) {
     if (isDev) {
       await startDev();
     } else {
@@ -288,5 +338,7 @@ app.on('activate', async () => {
 
 app.on('before-quit', () => {
   appIsQuitting = true;
+  tray?.destroy();
+  tray = null;
   stopBackend();
 });
