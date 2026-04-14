@@ -4,6 +4,9 @@ dist/
 
 # Backend data (SQLite DB, encrypted credentials, cloned repos)
 packages/backend/data/
+**/data/*.db
+**/data/*.db-shm
+**/data/*.db-wal
 
 # Electron build output
 packages/electron/release/
