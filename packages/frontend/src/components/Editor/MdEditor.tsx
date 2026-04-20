@@ -8,13 +8,8 @@ export default function MdEditor() {
     const { selectedMdFile, setSelectedMdFile, mdFiles, setMdFiles } = useAppStore();
     const [content, setContent] = useState('');
     const [saving, setSaving] = useState(false);
-    const [showPreview, setShowPreview] = useState(true);
+    const [showPreview, setShowPreview] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
-
-    // Sync content when a different file is selected
-    useEffect(() => {
-        setContent(selectedMdFile?.content ?? '');
-    }, [selectedMdFile?.id]);
 
     const save = useCallback(async () => {
         if (!selectedMdFile) return;
@@ -32,9 +27,21 @@ export default function MdEditor() {
         }
     }, [selectedMdFile, content, mdFiles, setSelectedMdFile, setMdFiles]);
 
-    // Keep a stable ref so the Monaco keybinding always calls the latest save
+    // Keep a stable ref so the Monaco keybinding and auto-save always call the latest save
     const saveRef = useRef(save);
     useEffect(() => { saveRef.current = save; }, [save]);
+
+    const prevFileId = useRef<number | undefined>(undefined);
+
+    // Auto-save when switching to a different file
+    useEffect(() => {
+        const prev = prevFileId.current;
+        prevFileId.current = selectedMdFile?.id;
+        if (prev !== undefined && prev !== selectedMdFile?.id) {
+            void saveRef.current();
+        }
+        setContent(selectedMdFile?.content ?? '');
+    }, [selectedMdFile?.id]);
 
     if (!selectedMdFile) return null;
 
@@ -67,7 +74,7 @@ export default function MdEditor() {
                     <button
                         onClick={() => setShowPreview(!showPreview)}
                         className={`text-xs px-2 py-1 rounded transition-colors ${showPreview
-                            ? 'bg-indigo-600 text-white'
+                            ? 'bg-orange-600 text-white'
                             : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                             }`}
                     >
@@ -76,7 +83,7 @@ export default function MdEditor() {
                     <button
                         onClick={save}
                         disabled={saving}
-                        className="text-xs px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded disabled:opacity-50 transition-colors"
+                        className="text-xs px-3 py-1 bg-orange-600 hover:bg-orange-500 text-white rounded disabled:opacity-50 transition-colors"
                     >
                         {saving ? 'Saving…' : 'Save'}
                     </button>

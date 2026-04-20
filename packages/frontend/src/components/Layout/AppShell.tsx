@@ -10,6 +10,9 @@ import MdFilePanel from '../Editor/MdFilePanel';
 import CredentialsModal from './CredentialsModal';
 import SettingsModal from './SettingsModal';
 import PipelineModal from './PipelineModal';
+import InstallToolsModal from './InstallToolsModal';
+import PromptPanel from '../Prompt/PromptPanel';
+import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
 import { useNotifications } from '../../hooks/useNotifications';
 
@@ -57,6 +60,10 @@ export default function AppShell() {
     const [showCredentials, setShowCredentials] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showPipeline, setShowPipeline] = useState(false);
+    const [showInstallTools, setShowInstallTools] = useState(false);
+    const [toolsAnyMissing, setToolsAnyMissing] = useState(false);
+    const [showPrompts, setShowPrompts] = useState(false);
+    const [showAutomation, setShowAutomation] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -93,6 +100,7 @@ export default function AppShell() {
                 setRepos(repos); setAgents(agents); setCredentials(credentials); setMdFiles(mdFiles); setSettings(settings);
             })
             .catch(console.error);
+        api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
     }, [setRepos, setAgents, setCredentials, setMdFiles, setSettings]);
 
     useEffect(() => {
@@ -134,11 +142,29 @@ export default function AppShell() {
                     setActiveView('terminal');
                 }
             }
+            // Ctrl+1 — Run template, Ctrl+2 — Automation tasks, Ctrl+L — Lock
+            if (event.key === '1' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                event.preventDefault();
+                setShowPrompts(true);
+                return;
+            }
+            if (event.key === '2' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                event.preventDefault();
+                setShowAutomation(true);
+                return;
+            }
+            if (event.key === 'l' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                if (settings?.auth?.enabled) {
+                    event.preventDefault();
+                    lock();
+                }
+                return;
+            }
         };
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession]);
+    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession, settings, lock]);
 
     // ── Shared button class strings ───────────────────────────────────────────
     const iconBtnBase = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-all font-medium';
@@ -158,7 +184,7 @@ export default function AppShell() {
                                 onClick={() => setActiveView('terminal')}
                                 title="Terminal view (Ctrl+`)"
                                 className={`${iconBtnBase} ${activeView === 'terminal'
-                                    ? 'bg-indigo-600/90 border-indigo-500 text-white shadow-sm shadow-indigo-950/60'
+                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
                                     : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                     }`}
                             >
@@ -170,7 +196,7 @@ export default function AppShell() {
                                 onClick={() => { if (selectedMdFile) setActiveView('editor'); }}
                                 title={selectedMdFile ? 'Editor view (Ctrl+`)' : 'Open an MD file to use editor view'}
                                 className={`${iconBtnBase} ${activeView === 'editor'
-                                    ? 'bg-indigo-600/90 border-indigo-500 text-white shadow-sm shadow-indigo-950/60'
+                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
                                     : selectedMdFile
                                         ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                         : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
@@ -178,6 +204,30 @@ export default function AppShell() {
                             >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <div className="w-px h-6 bg-gray-700/80" />
+
+                        {/* ── Actions: Run template / Automation ── */}
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setShowPrompts(true)}
+                                title="Run template (Ctrl+1)"
+                                className={iconBtnDefault}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={() => setShowAutomation(true)}
+                                title="Automation tasks (Ctrl+2)"
+                                className={iconBtnDefault}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
                         </div>
@@ -193,6 +243,22 @@ export default function AppShell() {
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                                 </svg>
+                            </button>
+                            {/* CLI Tools install button — amber badge when tools are missing */}
+                            <button
+                                onClick={() => setShowInstallTools(true)}
+                                title={toolsAnyMissing ? 'CLI tools missing — click to install' : 'CLI Agent Tools'}
+                                className={`${iconBtnBase} relative ${toolsAnyMissing
+                                    ? 'bg-amber-600/20 border-amber-500/60 text-amber-400 hover:bg-amber-600/30 hover:border-amber-400'
+                                    : iconBtnDefault.replace(`${iconBtnBase} `, '')
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
+                                </svg>
+                                {toolsAnyMissing && (
+                                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400" />
+                                )}
                             </button>
                             <button
                                 onClick={() => setShowSettings(true)}
@@ -221,7 +287,7 @@ export default function AppShell() {
                             {settings?.auth?.enabled && (
                                 <button
                                     onClick={lock}
-                                    title="Lock"
+                                    title="Lock (Ctrl+L)"
                                     className={iconBtnDefault}
                                 >
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -233,7 +299,7 @@ export default function AppShell() {
                                 onClick={() => void toggleFullscreen()}
                                 title={isFullscreen ? 'Exit fullscreen (F11)' : 'Enter fullscreen (F11)'}
                                 className={`${iconBtnBase} ${isFullscreen
-                                    ? 'bg-emerald-600/90 border-emerald-500 text-white shadow-sm shadow-emerald-950/60'
+                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
                                     : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                     }`}
                             >
@@ -263,7 +329,7 @@ export default function AppShell() {
                             style={{ width: sidebar.width }}
                         >
                             <header className="flex items-center justify-between px-3 py-2.5 border-b border-gray-800/80 bg-gray-950/40 shrink-0">
-                                <h2 className="text-[11px] font-bold text-indigo-400 tracking-[0.12em] uppercase">
+                                <h2 className="text-[11px] font-bold text-orange-400 tracking-[0.12em] uppercase">
                                     Workspace
                                 </h2>
                                 <div className="flex items-center gap-1">
@@ -283,7 +349,7 @@ export default function AppShell() {
                         </aside>
                         <div
                             onMouseDown={sidebar.onMouseDown}
-                            className="w-1 cursor-col-resize bg-gray-800/60 hover:bg-indigo-500/60 active:bg-indigo-500 transition-colors flex-shrink-0"
+                            className="w-1 cursor-col-resize bg-gray-800/60 hover:bg-orange-500/60 active:bg-orange-500 transition-colors flex-shrink-0"
                         />
                     </>
                 ) : (
@@ -318,7 +384,7 @@ export default function AppShell() {
                         <>
                             <div
                                 onMouseDown={mdPanel.onMouseDown}
-                                className="w-1 cursor-col-resize bg-gray-800/60 hover:bg-indigo-500/60 active:bg-indigo-500 transition-colors flex-shrink-0"
+                                className="w-1 cursor-col-resize bg-gray-800/60 hover:bg-orange-500/60 active:bg-orange-500 transition-colors flex-shrink-0"
                             />
                             <div className="flex-shrink-0 overflow-hidden" style={{ width: mdPanel.width }}>
                                 <MdFilePanel onCollapse={() => setRightPanelCollapsed(true)} />
@@ -339,6 +405,11 @@ export default function AppShell() {
             {showCredentials && <CredentialsModal onClose={() => setShowCredentials(false)} />}
             {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
             {showPipeline && <PipelineModal onClose={() => setShowPipeline(false)} />}
+            {showInstallTools && (
+                <InstallToolsModal onClose={() => { setShowInstallTools(false); api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { }); }} />
+            )}
+            {showPrompts && <PromptPanel onClose={() => setShowPrompts(false)} />}
+            {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}
             <ToastContainer />
         </div>
     );

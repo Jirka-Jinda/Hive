@@ -13,6 +13,7 @@ import { agentsRouter } from './routes/agents';
 import { mdfilesRouter } from './routes/mdfiles';
 import { settingsRouter } from './routes/settings';
 import { pipelineRouter } from './routes/pipeline';
+import { toolsRouter } from './routes/tools';
 import { setupWebSocketServer } from './ws/terminal';
 import { setupShellServer } from './ws/shell';
 import { setupNotifyServer } from './ws/notify';
@@ -23,27 +24,42 @@ import { MdFileManager } from './services/mdfile-manager';
 import { MdRefService } from './services/md-ref-service';
 import { SettingsService } from './services/settings-service';
 import { NotificationBus } from './services/notification-bus';
+import { CentralMdSyncService } from './services/central-md-sync';
 import { PipelineRegistry } from './pipeline/pipeline-registry';
 import { createMdContextNode } from './pipeline/nodes/md-context.node';
 import { createSessionStateWatcherNode } from './pipeline/nodes/session-state-watcher.node';
 import { SessionStore } from './services/session-store';
-import { join as pathJoin } from 'node:path';
+import { RepoManager } from './services/repo-manager';
+import { CredentialStore } from './services/credential-store';
 import { WorkspaceService } from './application/workspace-service';
+import { AutomationService } from './services/automation-service';
+import { automationRouter } from './routes/automation';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
-const db = openDb(pathJoin(Config.DATA_DIR, 'app.db'));
+const db = openDb(join(Config.DATA_DIR, 'app.db'));
 migrate(db);
 const settingsService = new SettingsService();
 const mdMgr = new MdFileManager(db);
-const workspace = new WorkspaceService(db, mdMgr, settingsService);
+const centralMdSync = new CentralMdSyncService(mdMgr);
+mdMgr.setSyncService(centralMdSync);
+centralMdSync.fullSync();
+
+// ── Services (single instances shared across routes, WS, and pipelines) ───
+const sessionStore = new SessionStore(db);
+const repoManager = new RepoManager(db, settingsService);
+const credentialStore = new CredentialStore(db);
+const mdRefService = new MdRefService(db);
+const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
 const notificationBus = new NotificationBus();
-const sessionStore = new SessionStore(db);
-const mdRefService = new MdRefService(db);
 const pipelineRegistry = new PipelineRegistry(settingsService);
 pipelineRegistry.register(createMdContextNode(mdRefService));
 pipelineRegistry.register(createSessionStateWatcherNode(sessionStore, notificationBus));
+
+// ── Automation ─────────────────────────────────────────────────────────────
+const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager);
+automationService.startAll();
 
 // ── Hono app ───────────────────────────────────────────────────────────────
 const app = new Hono();
@@ -61,12 +77,14 @@ app.get('/api/health', (c) =>
 );
 
 // API routes
-app.route('/api/repos', reposRouter(db, mdMgr, settingsService));
-app.route('/api/credentials', credentialsRouter(db));
+app.route('/api/repos', reposRouter(workspace, mdRefService));
+app.route('/api/credentials', credentialsRouter(credentialStore));
 app.route('/api/agents', agentsRouter());
-app.route('/api/mdfiles', mdfilesRouter(db, mdMgr));
+app.route('/api/mdfiles', mdfilesRouter(mdMgr));
 app.route('/api/settings', settingsRouter(settingsService));
 app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
+app.route('/api/tools', toolsRouter());
+app.route('/api/automation', automationRouter(automationService));
 
 // Static frontend (production only)
 if (Config.NODE_ENV === 'production') {
@@ -93,7 +111,7 @@ const termWss = new WebSocketServer({ noServer: true });
 const shellWss = new WebSocketServer({ noServer: true });
 const notifyWss = new WebSocketServer({ noServer: true });
 
-setupWebSocketServer(termWss, db, settingsService, pipelineRegistry, notificationBus);
+setupWebSocketServer(termWss, sessionStore, repoManager, credentialStore, pipelineRegistry, notificationBus);
 setupShellServer(shellWss);
 setupNotifyServer(notifyWss, notificationBus);
 

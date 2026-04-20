@@ -6,6 +6,7 @@ export interface AuthSettings {
 
 export interface AppSettings {
   reposDir: string;
+  centralMdDir: string;
   auth: AuthSettings;
 }
 
@@ -61,9 +62,29 @@ export interface MdFile {
   scope: 'central' | 'repo';
   repo_id: number | null;
   path: string;
-  type: 'skill' | 'tool' | 'instruction' | 'other';
+  type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
   created_at: string;
   updated_at: string;
+}
+
+export interface ParamDef {
+  name: string;
+  type: 'text' | 'repo' | 'session';
+  default?: string;
+  description?: string;
+}
+
+export interface AutomationTask {
+  id: number;
+  name: string;
+  md_file_id: number;
+  session_id: number;
+  cron: string;
+  params: string; // JSON Record<string,string>
+  enabled: number; // 0 | 1
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
 }
 
 // Helper
@@ -104,6 +125,11 @@ export const api = {
             body: JSON.stringify({ mdFileIds }),
           }),
       },
+      inject: (repoId: number, sid: number, text: string) =>
+        request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}/inject`, {
+          method: 'POST',
+          body: JSON.stringify({ text }),
+        }),
     },
 
     mdRefs: {
@@ -151,6 +177,13 @@ export const api = {
       request<MdFile>(`/mdfiles/${id}`, { method: 'PUT', body: JSON.stringify({ content }) }),
     delete: (id: number) =>
       request<{ ok: boolean }>(`/mdfiles/${id}`, { method: 'DELETE' }),
+    params: (id: number) =>
+      request<{ name: string; description: string; params: ParamDef[] }>(`/mdfiles/${id}/params`),
+    render: (id: number, params: Record<string, string>) =>
+      request<{ rendered: string }>(`/mdfiles/${id}/render`, {
+        method: 'POST',
+        body: JSON.stringify({ params }),
+      }),
   },
 
   settings: {
@@ -163,5 +196,20 @@ export const api = {
     list: () => request<PipelineNodeDto[]>('/pipeline'),
     setEnabled: (id: string, enabled: boolean) =>
       request<PipelineNodeDto[]>(`/pipeline/${id}`, { method: 'PUT', body: JSON.stringify({ enabled }) }),
+  },
+
+  tools: {
+    status: () => request<{ tools: { id: string; name: string; command: string; installed: boolean }[]; anyMissing: boolean }>('/tools'),
+    /** Returns an EventSource-compatible URL for streaming install output */
+    installUrl: () => '/api/tools/install',
+  },
+
+  automation: {
+    list: () => request<AutomationTask[]>('/automation'),
+    create: (body: { name: string; md_file_id: number; session_id: number; cron: string; params?: Record<string, string> }) =>
+      request<AutomationTask>('/automation', { method: 'POST', body: JSON.stringify(body) }),
+    pause: (id: number) => request<AutomationTask>(`/automation/${id}/pause`, { method: 'PUT' }),
+    resume: (id: number) => request<AutomationTask>(`/automation/${id}/resume`, { method: 'PUT' }),
+    delete: (id: number) => request<{ ok: boolean }>(`/automation/${id}`, { method: 'DELETE' }),
   },
 };

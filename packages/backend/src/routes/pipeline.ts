@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { PipelineRegistry } from '../pipeline/pipeline-registry';
+import { getErrorMessage } from '../utils/errors';
 
 export function pipelineRouter(registry: PipelineRegistry): Hono {
   const app = new Hono();
@@ -18,7 +19,7 @@ export function pipelineRouter(registry: PipelineRegistry): Hono {
       const updated = registry.setEnabled(id, body.enabled);
       return c.json(updated);
     } catch (err: unknown) {
-      return c.json({ error: (err as Error).message }, 404);
+      return c.json({ error: getErrorMessage(err) }, 404);
     }
   });
 

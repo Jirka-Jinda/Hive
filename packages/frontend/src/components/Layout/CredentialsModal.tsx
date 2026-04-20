@@ -64,23 +64,15 @@ export default function CredentialsModal({ onClose }: Props) {
             <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg shadow-2xl overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
                     <h2 className="text-sm font-semibold text-gray-100">Credential Profiles</h2>
-                    <div className="flex gap-2 items-center">
-                        <button
-                            onClick={() => setShowCreate(!showCreate)}
-                            className={`inline-flex items-center gap-0.5 text-xs px-2.5 py-1 rounded border transition-all font-medium ${showCreate
-                                ? 'bg-indigo-600 border-indigo-500 text-white'
-                                : 'bg-gray-800 border-gray-700 text-indigo-400 hover:bg-gray-750 hover:text-indigo-300 hover:border-gray-600'
-                                }`}
-                        >
-                            {showCreate ? '✕ Cancel' : '+ Add'}
-                        </button>
-                        <button
-                            onClick={onClose}
-                            className="inline-flex items-center justify-center w-6 h-6 rounded border bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-200 hover:bg-gray-750 hover:border-gray-600 transition-all text-xs font-medium"
-                        >
-                            ✕
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => setShowCreate(!showCreate)}
+                        className={`inline-flex items-center gap-0.5 text-xs px-2.5 py-1 rounded border transition-all font-medium ${showCreate
+                            ? 'bg-orange-600 border-orange-500 text-white'
+                            : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
+                            }`}
+                    >
+                        {showCreate ? '✕ Cancel' : '+ Add'}
+                    </button>
                 </div>
 
                 <div className="p-4 max-h-96 overflow-y-auto">
@@ -91,14 +83,14 @@ export default function CredentialsModal({ onClose }: Props) {
                     {showCreate && (
                         <div className="mb-4 p-3 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-2">
                             <input
-                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                 placeholder="Profile name (e.g. My Claude Key)"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 autoFocus
                             />
                             <select
-                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-indigo-500 transition-all"
+                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all"
                                 value={agentType}
                                 onChange={(e) => {
                                     setAgentType(e.target.value);
@@ -116,7 +108,7 @@ export default function CredentialsModal({ onClose }: Props) {
                                     <label className="text-xs text-gray-500 block mb-1 font-medium">{field.label}</label>
                                     <input
                                         type={field.secret ? 'password' : 'text'}
-                                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                         placeholder={field.key}
                                         value={envVars[field.key] ?? ''}
                                         onChange={(e) =>
@@ -131,7 +123,7 @@ export default function CredentialsModal({ onClose }: Props) {
                             <button
                                 onClick={handleCreate}
                                 disabled={saving}
-                                className="w-full text-xs bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {saving ? 'Saving…' : 'Save Profile'}
                             </button>
@@ -181,6 +173,16 @@ export default function CredentialsModal({ onClose }: Props) {
                             ))}
                         </ul>
                     )}
+                </div>
+
+                {/* Footer */}
+                <div className="flex justify-end px-4 py-3 border-t border-gray-800">
+                    <button
+                        onClick={onClose}
+                        className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 font-medium transition-all"
+                    >
+                        Close
+                    </button>
                 </div>
             </div>
         </div>

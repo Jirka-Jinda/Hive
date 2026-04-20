@@ -91,8 +91,8 @@ export default function SessionList() {
                 <button
                     onClick={() => { setShowNew(!showNew); setErrorMsg(''); }}
                     className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${showNew
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                        : 'bg-gray-800 border-gray-700 text-indigo-400 hover:bg-gray-750 hover:text-indigo-300 hover:border-gray-600'
+                        ? 'bg-orange-600 border-orange-500 text-white'
+                        : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
                         }`}
                 >
                     {showNew ? '✕' : '+ Add'}
@@ -102,7 +102,7 @@ export default function SessionList() {
             {showNew && (
                 <div className="mb-2 p-2.5 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-2">
                     <input
-                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                         placeholder="Session name"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
@@ -116,7 +116,7 @@ export default function SessionList() {
                         onCredentialChange={setCredId}
                     />
                     <MdFilePicker
-                        files={mdFiles}
+                        files={mdFiles.filter((f) => f.type !== 'prompt')}
                         selected={selectedRefs}
                         onChange={setSelectedRefs}
                         label="Context files (optional)"
@@ -125,7 +125,7 @@ export default function SessionList() {
                     <button
                         onClick={createSession}
                         disabled={creating}
-                        className="w-full text-xs bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {creating ? 'Starting…' : 'Start Session'}
                     </button>
@@ -151,7 +151,7 @@ export default function SessionList() {
                             key={session.id}
                             onClick={() => setSelectedSession(session)}
                             className={`group rounded cursor-pointer text-sm ${isActive
-                                ? 'bg-indigo-700 text-white'
+                                ? 'bg-orange-700 text-white'
                                 : 'text-gray-300 hover:bg-gray-800'
                                 }`}
                         >
@@ -199,7 +199,7 @@ export default function SessionList() {
                                     {sessionRefs.map((f) => (
                                         <span
                                             key={f.id}
-                                            className="inline-flex items-center gap-0.5 text-[10px] bg-indigo-900/60 text-indigo-200/80 px-1.5 py-0.5 rounded font-medium"
+                                            className="inline-flex items-center gap-0.5 text-[10px] bg-orange-900/60 text-orange-200/80 px-1.5 py-0.5 rounded font-medium"
                                             title={f.path}
                                         >
                                             {f.path.split(/[/\\]/).pop()}

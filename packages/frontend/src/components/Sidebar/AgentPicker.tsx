@@ -23,7 +23,7 @@ export default function AgentPicker({
     return (
         <div className="space-y-1">
             <select
-                className="w-full bg-gray-900 border border-gray-700 text-sm px-2 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-indigo-500 transition-all"
+                className="w-full bg-gray-900 border border-gray-700 text-sm px-2 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all"
                 value={agentType}
                 onChange={(e) => {
                     onAgentChange(e.target.value);
@@ -46,7 +46,7 @@ export default function AgentPicker({
             </select>
 
             <select
-                className="w-full bg-gray-900 border border-gray-700 text-sm px-2 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-indigo-500 transition-all disabled:opacity-40"
+                className="w-full bg-gray-900 border border-gray-700 text-sm px-2 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all disabled:opacity-40"
                 value={credentialId ?? ''}
                 onChange={(e) =>
                     onCredentialChange(e.target.value ? parseInt(e.target.value, 10) : undefined)

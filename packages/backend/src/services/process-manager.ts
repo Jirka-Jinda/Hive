@@ -1,6 +1,7 @@
 import * as pty from 'node-pty';
 import { EventEmitter } from 'node:events';
 import type { AgentAdapter } from './agents';
+import { resolveCommand } from './agents';
 
 export interface ProcessEntry {
   pty: pty.IPty;
@@ -22,7 +23,8 @@ export function spawnAgent(
   const existing = processes.get(sessionId);
   if (existing) return existing;
 
-  const proc = pty.spawn(adapter.command, adapter.buildArgs(credential), {
+  const resolvedCommand = resolveCommand(adapter.command);
+  const proc = pty.spawn(resolvedCommand, adapter.buildArgs(credential), {
     name: 'xterm-color',
     cols,
     rows,

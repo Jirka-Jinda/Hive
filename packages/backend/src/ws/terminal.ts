@@ -1,10 +1,8 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
-import type Database from 'better-sqlite3';
-import { SessionStore } from '../services/session-store';
-import { RepoManager } from '../services/repo-manager';
-import { CredentialStore } from '../services/credential-store';
-import type { SettingsService } from '../services/settings-service';
+import type { SessionStore } from '../services/session-store';
+import type { RepoManager } from '../services/repo-manager';
+import type { CredentialStore } from '../services/credential-store';
 import type { PipelineRegistry } from '../pipeline/pipeline-registry';
 import type { NotificationBus } from '../services/notification-bus';
 import { spawnAgent, getProcess } from '../services/process-manager';
@@ -13,14 +11,12 @@ import { getErrorMessage } from '../utils/errors';
 
 export function setupWebSocketServer(
   wss: WebSocketServer,
-  db: Database.Database,
-  settingsService: SettingsService,
+  sessionStore: SessionStore,
+  repoManager: RepoManager,
+  credentialStore: CredentialStore,
   pipelineRegistry: PipelineRegistry,
   notificationBus: NotificationBus,
 ): void {
-  const sessionStore = new SessionStore(db);
-  const repoManager = new RepoManager(db, settingsService);
-  const credentialStore = new CredentialStore(db);
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '', 'http://localhost');

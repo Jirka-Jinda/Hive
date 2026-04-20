@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import type Database from 'better-sqlite3';
-import { MdFileManager } from '../services/mdfile-manager';
+import type { MdFileManager } from '../services/mdfile-manager';
 import { getErrorMessage } from '../utils/errors';
+import { parseFrontmatter, renderTemplate } from '../utils/template';
 
-export function mdfilesRouter(db: Database.Database, mdMgr: MdFileManager): Hono {
+export function mdfilesRouter(mdMgr: MdFileManager): Hono {
   const app = new Hono();
 
   app.get('/', (c) => {
@@ -52,6 +52,27 @@ export function mdfilesRouter(db: Database.Database, mdMgr: MdFileManager): Hono
     try {
       mdMgr.delete(parseInt(c.req.param('id'), 10));
       return c.json({ ok: true });
+    } catch (error: unknown) {
+      return c.json({ error: getErrorMessage(error) }, 404);
+    }
+  });
+
+  app.get('/:id/params', (c) => {
+    try {
+      const { content } = mdMgr.read(parseInt(c.req.param('id'), 10));
+      const { meta } = parseFrontmatter(content);
+      return c.json({ name: meta.name ?? '', description: meta.description ?? '', params: meta.params ?? [] });
+    } catch (error: unknown) {
+      return c.json({ error: getErrorMessage(error) }, 404);
+    }
+  });
+
+  app.post('/:id/render', async (c) => {
+    const body = await c.req.json<{ params: Record<string, string> }>();
+    try {
+      const { content } = mdMgr.read(parseInt(c.req.param('id'), 10));
+      const rendered = renderTemplate(content, body.params);
+      return c.json({ rendered });
     } catch (error: unknown) {
       return c.json({ error: getErrorMessage(error) }, 404);
     }

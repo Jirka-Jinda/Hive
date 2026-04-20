@@ -10,7 +10,7 @@ export function settingsRouter(settingsService: SettingsService): Hono {
 
   app.put('/', async (c) => {
     try {
-      const body = await c.req.json<{ reposDir?: string; auth?: AuthSettings }>();
+      const body = await c.req.json<{ reposDir?: string; centralMdDir?: string; auth?: AuthSettings }>();
       return c.json(settingsService.save(body));
     } catch (error: unknown) {
       return c.json({ error: getErrorMessage(error) }, 400);

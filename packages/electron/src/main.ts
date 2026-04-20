@@ -15,8 +15,46 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import os from 'node:os';
 import fs from 'node:fs';
+import { execSync } from 'node:child_process';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * On Windows, GUI apps launched outside a terminal only inherit the PATH that
+ * was active when the user logged in — missing any user-level PATH entries
+ * added later (e.g. `gh`, `claude`, npm globals, scoop packages, etc.).
+ * This function reads both HKLM and HKCU PATH values directly from the
+ * registry and merges them into `process.env.PATH` so all child processes
+ * spawned by Electron (backend, node-pty shells) see the full PATH.
+ */
+function refreshWindowsPath(): void {
+  if (process.platform !== 'win32') return;
+  // Use reg.exe directly — ~10ms vs ~2s per PowerShell spawn
+  const regQuery = (hive: string): string => {
+    try {
+      const out = execSync(`reg query "${hive}" /v Path /reg:64`, {
+        encoding: 'utf8',
+        timeout: 2000,
+      });
+      const match = out.match(/Path\s+REG(?:_EXPAND)?_SZ\s+(.*)/i);
+      return match ? match[1].trim() : '';
+    } catch {
+      return '';
+    }
+  };
+  try {
+    const machinePath = regQuery(
+      'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
+    );
+    const userPath = regQuery('HKCU\\Environment');
+    const combined = [machinePath, userPath].filter(Boolean).join(';');
+    if (combined) process.env.PATH = combined;
+  } catch {
+    // Non-fatal — fall back to inherited PATH
+  }
+}
+
+refreshWindowsPath();
 
 /** Returns true when running from source (not a packaged build). */
 const isDev = !app.isPackaged;

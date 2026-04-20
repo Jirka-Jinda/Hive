@@ -34,6 +34,11 @@ import { agentsRouter } from '../routes/agents';
 import { mdfilesRouter } from '../routes/mdfiles';
 import { MdFileManager } from '../services/mdfile-manager';
 import { SettingsService } from '../services/settings-service';
+import { SessionStore } from '../services/session-store';
+import { RepoManager } from '../services/repo-manager';
+import { CredentialStore } from '../services/credential-store';
+import { MdRefService } from '../services/md-ref-service';
+import { WorkspaceService } from '../application/workspace-service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -44,15 +49,20 @@ function makeTestApp() {
   migrate(db);
   const mdMgr = new MdFileManager(db);
   const settingsService = new SettingsService();
+  const sessionStore = new SessionStore(db);
+  const repoManager = new RepoManager(db, settingsService);
+  const credentialStore = new CredentialStore(db);
+  const mdRefService = new MdRefService(db);
+  const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
 
   const app = new Hono();
   app.get('/api/health', (c) =>
     c.json({ status: 'ok', timestamp: new Date().toISOString() })
   );
-  app.route('/api/repos', reposRouter(db, mdMgr, settingsService));
-  app.route('/api/credentials', credentialsRouter(db));
+  app.route('/api/repos', reposRouter(workspace, mdRefService));
+  app.route('/api/credentials', credentialsRouter(credentialStore));
   app.route('/api/agents', agentsRouter());
-  app.route('/api/mdfiles', mdfilesRouter(db, mdMgr));
+  app.route('/api/mdfiles', mdfilesRouter(mdMgr));
   return app;
 }
 

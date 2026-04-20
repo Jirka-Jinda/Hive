@@ -19,8 +19,8 @@
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #6366f1;
-    /* indigo-500 */
+    background: #f97316;
+    /* orange-500 */
 }
 
 /* ── Base ────────────────────────────────────────────── */
@@ -32,8 +32,9 @@ body,
 }
 
 body {
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Fira Mono', ui-monospace, 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;
     -webkit-font-smoothing: antialiased;
+    font-size: 13px;
 }
 
 /* Drag handle — no text selection while resizing */

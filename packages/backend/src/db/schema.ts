@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS md_files (
   scope      TEXT    NOT NULL CHECK(scope IN ('central','repo')),
   repo_id    INTEGER REFERENCES repos(id) ON DELETE CASCADE,
   path       TEXT    NOT NULL,
-  type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','other')),
+  type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','prompt','other')),
   content    TEXT    NOT NULL DEFAULT '',
   created_at TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -70,5 +70,19 @@ CREATE TABLE IF NOT EXISTS session_md_refs (
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   md_file_id INTEGER NOT NULL REFERENCES md_files(id) ON DELETE CASCADE,
   PRIMARY KEY (session_id, md_file_id)
+);
+
+-- Automated task scheduler
+CREATE TABLE IF NOT EXISTS automation_tasks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT    NOT NULL,
+  md_file_id  INTEGER NOT NULL REFERENCES md_files(id) ON DELETE CASCADE,
+  session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  cron        TEXT    NOT NULL,
+  params      TEXT    NOT NULL DEFAULT '{}',
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  last_run_at TEXT,
+  next_run_at TEXT,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 `;

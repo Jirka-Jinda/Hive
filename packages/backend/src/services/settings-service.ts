@@ -14,6 +14,7 @@ export interface AuthSettings {
 
 export interface AppSettings {
   reposDir: string;
+  centralMdDir: string;
   pipeline: {
     nodes: Record<string, PipelineNodeSettings>;
   };
@@ -21,7 +22,7 @@ export interface AppSettings {
 }
 
 function envFilePath(): string {
-  return resolve(process.cwd(), '.env');
+  return resolve(Config.PROJECT_ROOT, '.env');
 }
 
 function readEnvFile(): string {
@@ -54,6 +55,7 @@ export class SettingsService {
     }
     return {
       reposDir: resolve(Config.PROJECT_ROOT, process.env.REPOS_DIR ?? Config.REPOS_DIR),
+      centralMdDir: Config.CENTRAL_MD_DIR,
       pipeline: { nodes: pipelineNodes },
       auth,
     };
@@ -67,6 +69,11 @@ export class SettingsService {
       writeEnvKey('REPOS_DIR', patch.reposDir);
       // Update the live process so the running server picks it up immediately
       process.env.REPOS_DIR = patch.reposDir;
+    }
+
+    if (patch.centralMdDir !== undefined) {
+      writeEnvKey('CENTRAL_MD_DIR', patch.centralMdDir);
+      process.env.CENTRAL_MD_DIR = patch.centralMdDir;
     }
 
     if (patch.pipeline !== undefined) {

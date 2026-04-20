@@ -1,11 +1,9 @@
 import { Hono } from 'hono';
-import type Database from 'better-sqlite3';
-import { CredentialStore } from '../services/credential-store';
+import type { CredentialStore } from '../services/credential-store';
 import { getErrorMessage } from '../utils/errors';
 
-export function credentialsRouter(db: Database.Database): Hono {
+export function credentialsRouter(store: CredentialStore): Hono {
   const app = new Hono();
-  const store = new CredentialStore(db);
 
   // List returns metadata only — never exposes encrypted_data
   app.get('/', (c) => c.json(store.list()));

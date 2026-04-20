@@ -1,19 +1,77 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { spawn } from 'node-pty';
 import { platform } from 'node:process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { join } from 'node:path';
+import { Config } from '../utils/config';
+
+/**
+ * Resolve the best available PowerShell on Windows.
+ *
+ * node-pty with useConpty:false (WinPTY) cannot follow the WindowsApps
+ * "app execution alias" reparse points, so we resolve the real binary path
+ * from the MSIX Store package via a fast registry query.
+ *
+ * Priority:
+ *   1. MSIX Store package (winget / MS Store install — always latest).
+ *   2. MSI / traditional install (C:\Program Files\PowerShell\7\).
+ *   3. Fallback inbox Windows PowerShell 5.x.
+ */
+function resolveWindowsShell(): string {
+  // 1. Query the MSIX package registry for the real install path (~10ms, no admin)
+  try {
+    const regKey =
+      'HKCU\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages';
+    const search = execSync(`reg query "${regKey}" /f "Microsoft.PowerShell_" /k /reg:64`, {
+      encoding: 'utf8',
+      timeout: 2000,
+    });
+    // Find the matching subkey(s) — pick the highest version (last after sort)
+    const keys = search
+      .match(/HKEY_CURRENT_USER\\[^\r\n]*Microsoft\.PowerShell_[^\r\n]+/g)
+      ?.sort() ?? [];
+    // Walk in reverse so highest version is tried first
+    for (let i = keys.length - 1; i >= 0; i--) {
+      try {
+        const vals = execSync(`reg query "${keys[i]}" /v PackageRootFolder /reg:64`, {
+          encoding: 'utf8',
+          timeout: 2000,
+        });
+        const m = vals.match(/PackageRootFolder\s+REG_SZ\s+(.*)/i);
+        if (m) {
+          const candidate = join(m[1].trim(), 'pwsh.exe');
+          if (existsSync(candidate)) return candidate;
+        }
+      } catch { /* skip this key */ }
+    }
+  } catch {
+    /* No MSIX package found — that's fine */
+  }
+
+  // 2. Traditional MSI install
+  const ps7 = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe';
+  if (existsSync(ps7)) return ps7;
+
+  // 3. Fallback
+  return 'powershell.exe';
+}
 
 export function setupShellServer(wss: WebSocketServer): void {
   wss.on('connection', (ws: WebSocket) => {
-    // Prefer PowerShell 7 (pwsh) on Windows; fall back to built-in powershell.exe if not installed.
-    const shell = platform === 'win32' ? 'pwsh.exe' : 'bash';
-    // Windows uses USERPROFILE, Unix uses HOME
-    const home = process.env.USERPROFILE ?? process.env.HOME ?? process.cwd();
+    const shell = platform === 'win32' ? resolveWindowsShell() : 'bash';
+
+    // Start in the central-md/ directory — Copilot/Claude can directly edit
+    // central MD files and cd ../repos to switch to the repos folder.
+    const centralMdDir = Config.CENTRAL_MD_DIR;
+    mkdirSync(centralMdDir, { recursive: true });
+    const cwd = centralMdDir;
 
     const pty = spawn(shell, [], {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
-      cwd: home,
+      cwd,
       env: process.env as Record<string, string>,
       // Force WinPTY on Windows — ConPTY's console-list agent crashes for
       // interactive shells when the native helper binary is not pre-built.

@@ -47,19 +47,13 @@ export default function PipelineModal({ onClose }: Props) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-lg mx-4">
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                <div className="flex items-center px-4 py-3 border-b border-gray-800">
                     <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                         </svg>
                         <span className="text-sm font-semibold text-gray-200">Prompt Pipeline</span>
                     </div>
-                    <button
-                        onClick={onClose}
-                        className="inline-flex items-center justify-center w-6 h-6 rounded border bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-200 hover:border-gray-600 transition-all text-xs font-medium"
-                    >
-                        ✕
-                    </button>
                 </div>
 
                 {/* Explainer */}
@@ -92,8 +86,8 @@ export default function PipelineModal({ onClose }: Props) {
                                 disabled={toggling === node.id}
                                 title={node.enabled ? 'Disable node' : 'Enable node'}
                                 className={`relative mt-0.5 flex-shrink-0 w-9 h-5 rounded-full border transition-all focus:outline-none ${node.enabled
-                                        ? 'bg-indigo-600 border-indigo-500'
-                                        : 'bg-gray-700 border-gray-600'
+                                    ? 'bg-orange-600 border-orange-500'
+                                    : 'bg-gray-700 border-gray-600'
                                     } disabled:opacity-50`}
                             >
                                 <span

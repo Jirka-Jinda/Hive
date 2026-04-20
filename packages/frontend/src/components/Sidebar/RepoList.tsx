@@ -120,8 +120,8 @@ export default function RepoList() {
                 <button
                     onClick={() => { setShowAdd(!showAdd); setErrorMsg(''); }}
                     className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${showAdd
-                        ? 'bg-indigo-600 border-indigo-500 text-white'
-                        : 'bg-gray-800 border-gray-700 text-indigo-400 hover:bg-gray-750 hover:text-indigo-300 hover:border-gray-600'
+                        ? 'bg-orange-600 border-orange-500 text-white'
+                        : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
                         }`}
                 >
                     {showAdd ? '✕' : '+ Add'}
@@ -134,7 +134,7 @@ export default function RepoList() {
                         <button
                             onClick={() => { setIsGit(false); setErrorMsg(''); }}
                             className={`flex-1 text-xs py-1 rounded transition-all font-medium ${!isGit
-                                ? 'bg-indigo-600 text-white shadow-sm'
+                                ? 'bg-orange-600 text-white shadow-sm'
                                 : 'text-gray-400 hover:text-gray-200'
                                 }`}
                         >
@@ -143,7 +143,7 @@ export default function RepoList() {
                         <button
                             onClick={() => { setIsGit(true); setErrorMsg(''); }}
                             className={`flex-1 text-xs py-1 rounded transition-all font-medium ${isGit
-                                ? 'bg-indigo-600 text-white shadow-sm'
+                                ? 'bg-orange-600 text-white shadow-sm'
                                 : 'text-gray-400 hover:text-gray-200'
                                 }`}
                         >
@@ -153,7 +153,7 @@ export default function RepoList() {
 
                     {isGit ? (
                         <input
-                            className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all"
+                            className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                             placeholder="https://github.com/org/repo.git"
                             value={gitInput}
                             onChange={(e) => setGitInput(e.target.value)}
@@ -173,7 +173,7 @@ export default function RepoList() {
                                     key={d.path}
                                     onClick={() => setSelectedPath(d.path === selectedPath ? '' : d.path)}
                                     className={`flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-xs transition-all ${selectedPath === d.path
-                                        ? 'bg-indigo-700 text-white'
+                                        ? 'bg-orange-700 text-white'
                                         : 'text-gray-300 hover:bg-gray-700'
                                         }`}
                                 >
@@ -188,7 +188,7 @@ export default function RepoList() {
                     <button
                         onClick={addRepo}
                         disabled={loading || (isGit ? !gitInput.trim() : !selectedPath)}
-                        className="w-full text-xs bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {loading ? (isGit ? 'Cloning…' : 'Adding…') : 'Add Repository'}
                     </button>
@@ -197,15 +197,15 @@ export default function RepoList() {
 
             {/* Step 2 — link central MD files to the just-created repo */}
             {pendingRepo && (
-                <div className="mb-2 p-2.5 bg-gray-800/80 border border-indigo-600/40 rounded-lg space-y-2">
-                    <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">
+                <div className="mb-2 p-2.5 bg-gray-800/80 border border-orange-600/40 rounded-lg space-y-2">
+                    <p className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">
                         Context files for {pendingRepo.name}
                     </p>
                     <p className="text-xs text-gray-500">
                         Select central MD files to inject as context when sessions start.
                     </p>
                     <MdFilePicker
-                        files={mdFiles.filter((f) => f.scope === 'central')}
+                        files={mdFiles.filter((f) => f.scope === 'central' && f.type !== 'prompt')}
                         selected={selectedRefs}
                         onChange={setSelectedRefs}
                     />
@@ -213,7 +213,7 @@ export default function RepoList() {
                         <button
                             onClick={saveRefs}
                             disabled={savingRefs}
-                            className="flex-1 text-xs bg-indigo-600 hover:bg-indigo-500 border border-indigo-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="flex-1 text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {savingRefs ? 'Saving…' : 'Save'}
                         </button>
@@ -238,7 +238,7 @@ export default function RepoList() {
                             key={repo.id}
                             onClick={() => !isPendingRemove && selectRepo(repo)}
                             className={`group rounded cursor-pointer text-sm ${isActive
-                                ? 'bg-indigo-700 text-white'
+                                ? 'bg-orange-700 text-white'
                                 : 'text-gray-300 hover:bg-gray-800'
                                 }`}
                         >
@@ -296,7 +296,7 @@ export default function RepoList() {
                                     {repoRefs.map((f) => (
                                         <span
                                             key={f.id}
-                                            className="inline-flex items-center gap-0.5 text-[10px] bg-indigo-900/60 text-indigo-200/80 px-1.5 py-0.5 rounded font-medium"
+                                            className="inline-flex items-center gap-0.5 text-[10px] bg-orange-900/60 text-orange-200/80 px-1.5 py-0.5 rounded font-medium"
                                             title={f.path}
                                         >
                                             {f.path.split(/[/\\]/).pop()}

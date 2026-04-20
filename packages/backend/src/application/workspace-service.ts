@@ -1,11 +1,11 @@
 import type Database from 'better-sqlite3';
 import { AGENT_ADAPTERS } from '../services/agents';
-import { CredentialStore } from '../services/credential-store';
-import { MdFileManager } from '../services/mdfile-manager';
+import type { CredentialStore } from '../services/credential-store';
+import type { MdFileManager } from '../services/mdfile-manager';
 import { killProcess } from '../services/process-manager';
 import { RepoManager } from '../services/repo-manager';
 import { SessionStore } from '../services/session-store';
-import { SettingsService } from '../services/settings-service';
+import type { SettingsService } from '../services/settings-service';
 
 export class WorkspaceService {
   private readonly repoManager: RepoManager;
@@ -16,10 +16,13 @@ export class WorkspaceService {
     db: Database.Database,
     private readonly mdFileManager: MdFileManager,
     private readonly settingsService: SettingsService,
+    credentialStore?: CredentialStore,
+    repoManager?: RepoManager,
+    sessionStore?: SessionStore,
   ) {
-    this.repoManager = new RepoManager(db, settingsService);
-    this.sessionStore = new SessionStore(db);
-    this.credentialStore = new CredentialStore(db);
+    this.repoManager = repoManager ?? new RepoManager(db, settingsService);
+    this.sessionStore = sessionStore ?? new SessionStore(db);
+    this.credentialStore = credentialStore ?? (() => { throw new Error('CredentialStore is required'); })();
   }
 
   listRepos() {

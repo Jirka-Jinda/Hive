@@ -1,15 +1,11 @@
 import { Hono } from 'hono';
-import type Database from 'better-sqlite3';
-import { WorkspaceService } from '../application/workspace-service';
-import { MdFileManager } from '../services/mdfile-manager';
-import { MdRefService } from '../services/md-ref-service';
-import { SettingsService } from '../services/settings-service';
+import type { WorkspaceService } from '../application/workspace-service';
+import type { MdRefService } from '../services/md-ref-service';
 import { getErrorMessage } from '../utils/errors';
+import { getProcess } from '../services/process-manager';
 
-export function reposRouter(db: Database.Database, mdMgr: MdFileManager, settingsService: SettingsService): Hono {
+export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefService): Hono {
   const app = new Hono();
-  const workspace = new WorkspaceService(db, mdMgr, settingsService);
-  const mdRefService = new MdRefService(db);
 
   app.get('/', (c) => c.json(workspace.listRepos()));
 
@@ -109,6 +105,15 @@ export function reposRouter(db: Database.Database, mdMgr: MdFileManager, setting
     const sessionId = parseInt(c.req.param('sid'), 10);
     const body = await c.req.json<{ mdFileIds: number[] }>();
     mdRefService.setSessionRefs(sessionId, body.mdFileIds ?? []);
+    return c.json({ ok: true });
+  });
+
+  app.post('/:id/sessions/:sid/inject', async (c) => {
+    const sessionId = parseInt(c.req.param('sid'), 10);
+    const body = await c.req.json<{ text: string }>();
+    const proc = getProcess(sessionId);
+    if (!proc) return c.json({ error: 'Session not running' }, 404);
+    proc.pty.write(body.text);
     return c.json({ ok: true });
   });
 

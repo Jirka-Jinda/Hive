@@ -1,12 +1,13 @@
 import { basename } from 'node:path';
 import type Database from 'better-sqlite3';
+import type { CentralMdSyncService } from './central-md-sync';
 
 export interface MdFile {
   id: number;
   scope: 'central' | 'repo';
   repo_id: number | null;
   path: string;
-  type: 'skill' | 'tool' | 'instruction' | 'other';
+  type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
   created_at: string;
   updated_at: string;
 }
@@ -29,7 +30,15 @@ function sanitizeFilename(name: string): string {
 }
 
 export class MdFileManager {
-  constructor(private db: Database.Database) {}
+  constructor(
+    private db: Database.Database,
+    private sync?: CentralMdSyncService,
+  ) {}
+
+  /** Wire in sync after construction (avoids circular init with CentralMdSyncService). */
+  setSyncService(sync: CentralMdSyncService): void {
+    this.sync = sync;
+  }
 
   list(scope?: string, repoId?: number): MdFile[] {
     if (scope && repoId !== undefined) {
@@ -57,11 +66,12 @@ export class MdFileManager {
   }
 
   write(id: number, content: string): MdFile {
-    const existing = this.db.prepare('SELECT id FROM md_files WHERE id = ?').get(id);
+    const existing = this.db.prepare('SELECT id,scope,path FROM md_files WHERE id = ?').get(id) as (MdFile) | undefined;
     if (!existing) throw new Error(`MD file ${id} not found`);
     this.db
       .prepare("UPDATE md_files SET content = ?, updated_at = datetime('now') WHERE id = ?")
       .run(content, id);
+    if (existing.scope === 'central') this.sync?.writeToDisk(existing.path, content);
     return this.db
       .prepare('SELECT id,scope,repo_id,path,type,created_at,updated_at FROM md_files WHERE id = ?')
       .get(id) as MdFile;
@@ -98,13 +108,18 @@ export class MdFileManager {
       `)
       .run(scope, repoId, safeName, inferredType, content);
 
+    if (scope === 'central') this.sync?.writeToDisk(safeName, content);
+
     return this.db
       .prepare('SELECT id,scope,repo_id,path,type,created_at,updated_at FROM md_files WHERE scope = ? AND path = ?')
       .get(scope, safeName) as MdFile;
   }
 
   delete(id: number): void {
+    const row = this.db.prepare('SELECT id,scope,path FROM md_files WHERE id = ?').get(id) as MdFile | undefined;
+    if (!row) throw new Error(`MD file ${id} not found`);
     const result = this.db.prepare('DELETE FROM md_files WHERE id = ?').run(id);
     if (result.changes === 0) throw new Error(`MD file ${id} not found`);
+    if (row.scope === 'central') this.sync?.deleteFromDisk(row.path);
   }
 }
