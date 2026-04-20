@@ -8,9 +8,9 @@
     Run this once before launching the app to ensure all agents are available.
 
     Supported tools:
-      - gh            GitHub CLI (required for Copilot CLI)
-      - gh copilot    GitHub Copilot extension for gh
+      - copilot       GitHub Copilot CLI (winget: GitHub.Copilot)
       - claude        Anthropic Claude Code (npm global)
+      - codex         OpenAI Codex CLI (npm global)
 
 .NOTES
     Requires: winget (Windows 10/11 built-in), Node.js / npm
@@ -25,66 +25,28 @@ function Write-Ok([string]$msg)   { Write-Host "    [OK] $msg" -ForegroundColor 
 function Write-Skip([string]$msg) { Write-Host "    [--] $msg" -ForegroundColor DarkGray }
 function Write-Fail([string]$msg) { Write-Host "    [!!] $msg" -ForegroundColor Red }
 
-# ── 1. GitHub CLI (gh) ─────────────────────────────────────────────────────
+# ── 1. GitHub Copilot CLI ─────────────────────────────────────────────────
 
-Write-Step "GitHub CLI (gh)"
-$ghPath = Get-Command gh -ErrorAction SilentlyContinue
-if ($ghPath) {
-    $ghVer = (gh --version 2>&1 | Select-Object -First 1).ToString().Trim()
-    Write-Skip "Already installed: $ghVer"
+Write-Step "GitHub Copilot CLI (copilot)"
+$copilotPath = Get-Command copilot -ErrorAction SilentlyContinue
+if ($copilotPath) {
+    $copilotVer = (copilot --version 2>&1 | Select-Object -First 1).ToString().Trim()
+    Write-Skip "Already installed: $copilotVer"
 } else {
-    Write-Host "    Installing via winget..." -ForegroundColor Yellow
+    Write-Host "    Installing via winget (GitHub.Copilot)..." -ForegroundColor Yellow
     try {
-        winget install --id GitHub.cli --accept-source-agreements --accept-package-agreements --silent
-        # Refresh PATH so gh is immediately available in this session
+        winget install --id GitHub.Copilot --accept-source-agreements --accept-package-agreements --silent
+        # Refresh PATH so copilot is immediately available in this session
         $env:PATH = [System.Environment]::GetEnvironmentVariable('Path','Machine') + ';' +
                     [System.Environment]::GetEnvironmentVariable('Path','User')
-        Write-Ok "GitHub CLI installed."
+        Write-Ok "GitHub Copilot CLI installed."
     } catch {
         Write-Fail "winget install failed: $_"
-        Write-Host "    Install manually: https://cli.github.com/" -ForegroundColor DarkYellow
+        Write-Host "    Install manually: winget install --id GitHub.Copilot" -ForegroundColor DarkYellow
     }
 }
 
-# ── 2. gh auth status ──────────────────────────────────────────────────────
-
-Write-Step "GitHub CLI authentication"
-$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-if ($ghCmd) {
-    $authStatus = gh auth status 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Skip "Already authenticated."
-    } else {
-        Write-Host "    Not authenticated. Launching browser login..." -ForegroundColor Yellow
-        gh auth login --web --git-protocol https
-    }
-} else {
-    Write-Skip "gh not available — skipping auth."
-}
-
-# ── 3. GitHub Copilot CLI extension ───────────────────────────────────────
-
-Write-Step "GitHub Copilot CLI (gh extension)"
-$ghCmd = Get-Command gh -ErrorAction SilentlyContinue
-if ($ghCmd) {
-    $extensions = gh extension list 2>&1
-    if ($extensions -match 'copilot') {
-        $copilotVer = ($extensions | Select-String 'copilot').Line.Trim()
-        Write-Skip "Already installed: $copilotVer"
-    } else {
-        Write-Host "    Installing gh copilot extension..." -ForegroundColor Yellow
-        try {
-            gh extension install github/gh-copilot
-            Write-Ok "gh copilot extension installed."
-        } catch {
-            Write-Fail "Extension install failed: $_"
-        }
-    }
-} else {
-    Write-Skip "gh not available — skipping Copilot CLI extension."
-}
-
-# ── 4. Claude Code (Anthropic) ────────────────────────────────────────────
+# ── 2. Claude Code (Anthropic) ────────────────────────────────────────────
 
 Write-Step "Claude Code CLI (claude)"
 $claudePath = Get-Command claude -ErrorAction SilentlyContinue
@@ -105,6 +67,47 @@ if ($claudePath) {
     } else {
         Write-Skip "npm not found — install Node.js first, then run: npm install -g @anthropic-ai/claude-code"
     }
+}
+
+# ── 3. Codex CLI (OpenAI) ─────────────────────────────────────────────────
+
+Write-Step "Codex CLI (@openai/codex)"
+$codexPath = Get-Command codex -ErrorAction SilentlyContinue
+if ($codexPath) {
+    $codexVer = (codex --version 2>&1 | Select-Object -First 1).ToString().Trim()
+    Write-Skip "Already installed: $codexVer"
+} else {
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        Write-Host "    Installing @openai/codex via npm..." -ForegroundColor Yellow
+        try {
+            npm install -g @openai/codex
+            Write-Ok "Codex CLI installed."
+        } catch {
+            Write-Fail "npm install failed: $_"
+            Write-Host "    Install manually: npm install -g @openai/codex" -ForegroundColor DarkYellow
+        }
+    } else {
+        Write-Skip "npm not found — install Node.js first, then run: npm install -g @openai/codex"
+    }
+}
+
+# ── 4. Codex authentication check ─────────────────────────────────────────
+
+Write-Step "Codex CLI authentication"
+$codexCmd = Get-Command codex -ErrorAction SilentlyContinue
+if ($codexCmd) {
+    $codexStatus = codex login status 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Skip "Already authenticated."
+    } else {
+        Write-Host "    Not authenticated." -ForegroundColor Yellow
+        Write-Host "    To authenticate with an API key, run:" -ForegroundColor DarkYellow
+        Write-Host "        codex login --with-api-key" -ForegroundColor DarkYellow
+        Write-Host "    Or add OPENAI_API_KEY to credentials in the Hive app." -ForegroundColor DarkYellow
+    }
+} else {
+    Write-Skip "codex not available — skipping auth check."
 }
 
 # ── Summary ────────────────────────────────────────────────────────────────

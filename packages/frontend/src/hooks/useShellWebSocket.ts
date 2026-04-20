@@ -10,18 +10,31 @@ export function useShellWebSocket(onData: (data: Uint8Array) => void) {
   const delayRef = useRef(RECONNECT_DELAY_MS);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmountedRef = useRef(false);
+  // Resize queued while the socket is still connecting / reconnecting
+  const pendingResizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  // Last known dims — included in the URL so a newly spawned shell PTY has the right size
+  const lastDimsRef = useRef<{ cols: number; rows: number }>({ cols: 80, rows: 24 });
   onDataRef.current = onData;
 
   const connect = useCallback(() => {
     if (unmountedRef.current) return;
 
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${protocol}://${window.location.host}/ws/shell`);
+    const { cols, rows } = lastDimsRef.current;
+    const ws = new WebSocket(
+      `${protocol}://${window.location.host}/ws/shell?cols=${cols}&rows=${rows}`
+    );
     ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
 
     ws.onopen = () => {
       delayRef.current = RECONNECT_DELAY_MS;
+      // Flush any resize queued before the socket was ready
+      if (pendingResizeRef.current) {
+        const { cols, rows } = pendingResizeRef.current;
+        pendingResizeRef.current = null;
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      }
     };
 
     ws.onmessage = (e) => {
@@ -59,8 +72,12 @@ export function useShellWebSocket(onData: (data: Uint8Array) => void) {
   }, []);
 
   const sendResize = useCallback((cols: number, rows: number) => {
+    lastDimsRef.current = { cols, rows };
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
+    } else {
+      // Queue for when the socket opens or reconnects
+      pendingResizeRef.current = { cols, rows };
     }
   }, []);
 

@@ -2,6 +2,9 @@
 node_modules/
 dist/
 
+# Cloned / managed repos — never committed to the workspace repo
+repos/
+
 # Backend data (SQLite DB, encrypted credentials, cloned repos)
 packages/backend/data/
 **/data/*.db

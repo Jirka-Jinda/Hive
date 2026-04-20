@@ -10,9 +10,13 @@ export const WIN_KNOWN_PATHS: Record<string, string[]> = {
     `${process.env.LOCALAPPDATA ?? ''}\\npm\\claude`,
   ],
   copilot: [
-    `${process.env.APPDATA ?? ''}\\npm\\copilot`,
-    `${process.env.APPDATA ?? ''}\\npm\\copilot.cmd`,
     `${process.env.LOCALAPPDATA ?? ''}\\Microsoft\\WinGet\\Packages\\GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe\\copilot.exe`,
+  ],
+  codex: [
+    `${process.env.APPDATA ?? ''}\\npm\\codex`,
+    `${process.env.APPDATA ?? ''}\\npm\\codex.cmd`,
+    `${process.env.LOCALAPPDATA ?? ''}\\npm\\codex`,
+    `${process.env.LOCALAPPDATA ?? ''}\\npm\\codex.cmd`,
   ],
 };
 

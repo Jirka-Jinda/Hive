@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { useWebSocket } from '../../hooks/useWebSocket';
@@ -13,11 +13,23 @@ export default function TerminalView({ sessionId }: Props) {
     const termRef = useRef<Terminal | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
 
-    const { send, sendResize } = useWebSocket(sessionId, (data) => {
-        termRef.current?.write(data);
-    });
+    // Measured terminal dimensions — WS connection is deferred until these are
+    // known so the PTY is spawned with the exact right size from the start.
+    const [initialDims, setInitialDims] = useState<{ cols: number; rows: number } | null>(null);
+
+    const { send, sendResize } = useWebSocket(
+        sessionId,
+        initialDims,
+        (data) => { termRef.current?.write(data); },
+        (_code, reason) => {
+            termRef.current?.write(`\r\n\x1b[31m\x1b[1m[Error]\x1b[0m\x1b[31m ${reason}\x1b[0m\r\n`);
+        },
+    );
 
     useEffect(() => {
+        // Reset dims so any previous session's connection is not reused
+        setInitialDims(null);
+
         if (!containerRef.current) return;
 
         const term = new Terminal({
@@ -37,8 +49,12 @@ export default function TerminalView({ sessionId }: Props) {
         term.loadAddon(fitAddon);
         term.open(containerRef.current);
 
-        // Small delay to allow layout to settle before fitting
-        setTimeout(() => fitAddon.fit(), 50);
+        // Measure after the browser has laid out the container, then unblock
+        // the WS connection with the real dimensions.
+        setTimeout(() => {
+            fitAddon.fit();
+            setInitialDims({ cols: term.cols, rows: term.rows });
+        }, 50);
 
         termRef.current = term;
         fitAddonRef.current = fitAddon;
@@ -46,7 +62,7 @@ export default function TerminalView({ sessionId }: Props) {
         // Forward user keystrokes to the PTY
         term.onData((data) => send(data));
 
-        // Resize PTY when the terminal element changes size
+        // Keep PTY in sync whenever the container is resized
         const observer = new ResizeObserver(() => {
             fitAddon.fit();
             sendResize(term.cols, term.rows);
@@ -59,7 +75,7 @@ export default function TerminalView({ sessionId }: Props) {
             termRef.current = null;
             fitAddonRef.current = null;
         };
-        // Re-initialize terminal when session changes
+        // send/sendResize are stable useCallback refs — won't re-trigger
     }, [sessionId, send, sendResize]);
 
     return (

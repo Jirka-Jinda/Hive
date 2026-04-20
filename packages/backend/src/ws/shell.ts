@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import type { IncomingMessage } from 'node:http';
 import { spawn } from 'node-pty';
 import { platform } from 'node:process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -58,7 +59,11 @@ function resolveWindowsShell(): string {
 }
 
 export function setupShellServer(wss: WebSocketServer): void {
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const cols = Math.max(20, Math.min(500, parseInt(url.searchParams.get('cols') ?? '', 10) || 80));
+    const rows = Math.max(5,  Math.min(200, parseInt(url.searchParams.get('rows') ?? '', 10) || 24));
+
     const shell = platform === 'win32' ? resolveWindowsShell() : 'bash';
 
     // Start in the central-md/ directory — Copilot/Claude can directly edit
@@ -69,8 +74,8 @@ export function setupShellServer(wss: WebSocketServer): void {
 
     const pty = spawn(shell, [], {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols,
+      rows,
       cwd,
       env: process.env as Record<string, string>,
       // Force WinPTY on Windows — ConPTY's console-list agent crashes for

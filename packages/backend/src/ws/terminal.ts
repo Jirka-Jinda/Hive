@@ -21,6 +21,8 @@ export function setupWebSocketServer(
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '', 'http://localhost');
     const sessionId = parseInt(url.searchParams.get('sessionId') ?? '0', 10);
+    const cols = Math.max(20, Math.min(500, parseInt(url.searchParams.get('cols') ?? '', 10) || 120));
+    const rows = Math.max(5,  Math.min(200, parseInt(url.searchParams.get('rows') ?? '', 10) || 30));
 
     if (!sessionId) {
       ws.close(1008, 'Missing sessionId');
@@ -60,7 +62,17 @@ export function setupWebSocketServer(
           // Proceed without credential if lookup fails
         }
       }
-      entry = spawnAgent(sessionId, adapter, repo.path, credential);
+      try {
+        // Persist credential to gh's OS credential store so Copilot CLI can
+        // authenticate via `gh auth token` fallback on all future sessions.
+        adapter.setupAuth?.(credential ?? {});
+        entry = spawnAgent(sessionId, adapter, repo.path, credential, cols, rows);
+      } catch (spawnError: unknown) {
+        sessionStore.setState(sessionId, 'stopped');
+        notificationBus.emitSessionState({ sessionId, state: 'stopped', sessionName: session.name });
+        ws.close(1011, `Failed to start agent: ${getErrorMessage(spawnError)}`);
+        return;
+      }
       sessionStore.setStatus(sessionId, 'running');
       sessionStore.setState(sessionId, 'working');
       notificationBus.emitSessionState({ sessionId, state: 'working', sessionName: session.name });
@@ -79,7 +91,15 @@ export function setupWebSocketServer(
 
     // PTY data → WebSocket (persist raw; pipeline may transform the live display)
     const onData = (data: Buffer) => {
-      sessionStore.appendLog(sessionId, data);
+      try {
+        sessionStore.appendLog(sessionId, data);
+      } catch {
+        // Session was deleted while the PTY was still flushing — detach and stop.
+        // Without this guard a FK-constraint failure would propagate into the
+        // node-pty native callback and crash the process.
+        entry!.events.off('data', onData);
+        return;
+      }
       void pipelineRegistry.run('agent-output', data.toString(), { sessionId, repoId: session.repo_id }).then((transformed) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(Buffer.from(transformed));
       });

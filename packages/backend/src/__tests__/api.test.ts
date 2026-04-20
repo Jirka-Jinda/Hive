@@ -136,10 +136,10 @@ describe('GET /api/agents', () => {
     expect(claude.credentialFields[0].secret).toBe(true);
   });
 
-  it('includes chatgpt and copilot agents', async () => {
+  it('includes codex and copilot agents', async () => {
     const res = await req(app, '/api/agents');
     const ids = (await res.json()).map((a: { id: string }) => a.id);
-    expect(ids).toContain('chatgpt');
+    expect(ids).toContain('codex');
     expect(ids).toContain('copilot');
   });
 });

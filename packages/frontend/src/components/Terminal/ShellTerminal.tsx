@@ -45,6 +45,8 @@ export default function ShellTerminal({ hidden }: Props) {
         setTimeout(() => {
             fitAddon.fit();
             term.focus();
+            // Queued via pendingResizeRef until the WS handshake completes
+            sendResize(term.cols, term.rows);
         }, 50);
 
         termRef.current = term;
