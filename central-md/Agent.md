@@ -1,3 +1,2 @@
-# Agent
+# agent.md
 
-- Nedělej mezery mezi větami
