@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import RepoList from '../Sidebar/RepoList';
@@ -10,50 +10,17 @@ import MdFilePanel from '../Editor/MdFilePanel';
 import CredentialsModal from './CredentialsModal';
 import SettingsModal from './SettingsModal';
 import PipelineModal from './PipelineModal';
+import UsageModal from './UsageModal';
 import InstallToolsModal from './InstallToolsModal';
 import PromptPanel from '../Prompt/PromptPanel';
 import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
 import { useNotifications } from '../../hooks/useNotifications';
-
-/** Drag-to-resize hook */
-function useDragResize(initial: number, min: number, max: number, side: 'right' | 'left' = 'right') {
-    const [width, setWidth] = useState(initial);
-    const dragging = useRef(false);
-    const startX = useRef(0);
-    const startW = useRef(0);
-
-    const onMouseDown = useCallback((e: React.MouseEvent) => {
-        dragging.current = true;
-        startX.current = e.clientX;
-        startW.current = width;
-        document.body.style.cursor = 'col-resize';
-        document.body.style.userSelect = 'none';
-        e.preventDefault();
-    }, [width]);
-
-    useEffect(() => {
-        const move = (e: MouseEvent) => {
-            if (!dragging.current) return;
-            const delta = side === 'right' ? e.clientX - startX.current : startX.current - e.clientX;
-            setWidth(Math.max(min, Math.min(max, startW.current + delta)));
-        };
-        const up = () => {
-            if (!dragging.current) return;
-            dragging.current = false;
-            document.body.style.cursor = '';
-            document.body.style.userSelect = '';
-        };
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
-        return () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
-    }, [min, max, side]);
-
-    return { width, onMouseDown };
-}
+import { useDragResize } from '../../hooks/useDragResize';
+import { useTokenUsage } from '../../hooks/useTokenUsage';
 
 export default function AppShell() {
-    const { setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, selectedSession, selectedMdFile, sessions, setSelectedSession, settings, lock } = useAppStore();
+    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
 
     useNotifications();
 
@@ -64,12 +31,27 @@ export default function AppShell() {
     const [toolsAnyMissing, setToolsAnyMissing] = useState(false);
     const [showPrompts, setShowPrompts] = useState(false);
     const [showAutomation, setShowAutomation] = useState(false);
+    const [showUsage, setShowUsage] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
 
     const sidebar = useDragResize(260, 180, 520, 'right');
     const mdPanel = useDragResize(260, 160, 440, 'left');
+    const {
+        summary: usageSummary,
+        loading: usageLoading,
+        error: usageError,
+        tokenUsageEnabled,
+        refreshUsage: loadUsage,
+        syncTokenUsageEnabled,
+    } = useTokenUsage(selectedRepo?.id);
+    const activeSessionRepo = selectedSession
+        ? repos.find((repo) => repo.id === selectedSession.repo_id) ?? null
+        : null;
+    const canOpenSessionRepoInVsCode = Boolean(
+        selectedSession && activeSessionRepo?.path && window.electronAPI?.isDesktop,
+    );
 
     const syncBrowserFullscreen = useCallback(() => {
         setIsFullscreen(Boolean(document.fullscreenElement));
@@ -94,6 +76,20 @@ export default function AppShell() {
         }
     }, []);
 
+    const openSelectedSessionRepoInVsCode = useCallback(async () => {
+        if (!activeSessionRepo?.path || !window.electronAPI?.openInVsCode) return;
+
+        try {
+            await window.electronAPI.openInVsCode(activeSessionRepo.path);
+        } catch (error) {
+            console.error('Failed to open repository in VS Code', error);
+        }
+    }, [activeSessionRepo?.path]);
+
+    const formatTokenUsage = useCallback((value: number) => {
+        return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: value >= 1000 ? 1 : 0 }).format(value);
+    }, []);
+
     useEffect(() => {
         Promise.all([api.repos.list(), api.agents.list(), api.credentials.list(), api.mdfiles.list(), api.settings.get()])
             .then(([repos, agents, credentials, mdFiles, settings]) => {
@@ -102,6 +98,12 @@ export default function AppShell() {
             .catch(console.error);
         api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
     }, [setRepos, setAgents, setCredentials, setMdFiles, setSettings]);
+
+    useEffect(() => {
+        if (!tokenUsageEnabled) {
+            setShowUsage(false);
+        }
+    }, [tokenUsageEnabled]);
 
     useEffect(() => {
         if (window.electronAPI?.isDesktop) {
@@ -169,6 +171,7 @@ export default function AppShell() {
     // ── Shared button class strings ───────────────────────────────────────────
     const iconBtnBase = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-all font-medium';
     const iconBtnDefault = `${iconBtnBase} bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600`;
+    const toolbarBoxCls = 'flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-900/90 px-3 py-1.5 shadow-sm shadow-black/20';
     const panelHdrBtnCls = 'inline-flex items-center justify-center w-6 h-6 rounded border bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-200 hover:bg-gray-750 hover:border-gray-600 transition-all text-sm leading-none font-medium';
     const collapseTabCls = 'w-7 flex items-center justify-center bg-gray-900 hover:bg-gray-800 text-gray-500 hover:text-gray-300 transition-colors text-base flex-shrink-0 font-medium';
 
@@ -177,7 +180,7 @@ export default function AppShell() {
             <header className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-4 py-2.5 border-b border-gray-800/80 bg-gray-950/40 shrink-0">
                 <div className="min-w-0" />
                 <div className="flex items-center justify-center">
-                    <div className="flex items-center gap-3 rounded-xl border border-gray-800 bg-gray-900/90 px-3 py-1.5 shadow-sm shadow-black/20">
+                    <div className={toolbarBoxCls}>
                         {/* ── View toggle: Terminal / Editor ── */}
                         <div className="flex items-center gap-1">
                             <button
@@ -210,7 +213,7 @@ export default function AppShell() {
 
                         <div className="w-px h-6 bg-gray-700/80" />
 
-                        {/* ── Actions: Run template / Automation ── */}
+                        {/* ── Actions: Run template / Automation / VS Code ── */}
                         <div className="flex items-center gap-1">
                             <button
                                 onClick={() => setShowPrompts(true)}
@@ -230,6 +233,15 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
+                            {canOpenSessionRepoInVsCode && activeSessionRepo && (
+                                <button
+                                    onClick={() => void openSelectedSessionRepoInVsCode()}
+                                    title={`Open ${activeSessionRepo.name} in VS Code`}
+                                    className={iconBtnDefault}
+                                >
+                                    <img src="/visual-studio.png" alt="" className="w-4 h-4 object-contain" />
+                                </button>
+                            )}
                         </div>
 
                         <div className="w-px h-6 bg-gray-700/80" />
@@ -317,7 +329,31 @@ export default function AppShell() {
                     </div>
                 </div>
 
-                <div />
+                <div className="min-w-0 flex items-center justify-end">
+                    {tokenUsageEnabled && (
+                        <div className={toolbarBoxCls}>
+                            <button
+                                onClick={() => { setShowUsage(true); void loadUsage(); }}
+                                title={selectedRepo ? `Token usage for ${selectedRepo.name}` : 'Token usage across all repositories'}
+                                className="inline-flex items-center gap-2 group"
+                            >
+                                <span
+                                    className={`${iconBtnBase} ${showUsage
+                                        ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
+                                        : 'bg-gray-800 border-gray-700 text-gray-300 group-hover:bg-gray-750 group-hover:text-white group-hover:border-gray-600'
+                                        }`}
+                                >
+                                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 19h16M7 15l3-3 2 2 5-6" />
+                                    </svg>
+                                </span>
+                                <span className="text-sm font-semibold text-gray-200 tabular-nums group-hover:text-white transition-colors">
+                                    {usageLoading ? '…' : formatTokenUsage(usageSummary?.totals.total_tokens ?? 0)}
+                                </span>
+                            </button>
+                        </div>
+                    )}
+                </div>
             </header>
 
             <div className="flex flex-1 overflow-hidden min-w-0">
@@ -370,7 +406,7 @@ export default function AppShell() {
 
                         {/* Session terminal — overlays the shell when a session is selected */}
                         {activeView === 'terminal' && selectedSession && (
-                            <TerminalView key={selectedSession.id} sessionId={selectedSession.id} />
+                            <TerminalView key={`${selectedSession.id}:${sessionTerminalVersions[selectedSession.id] ?? 0}`} sessionId={selectedSession.id} />
                         )}
 
                         {/* MD editor — shown only when editor view and a file is open */}
@@ -404,7 +440,17 @@ export default function AppShell() {
 
             {showCredentials && <CredentialsModal onClose={() => setShowCredentials(false)} />}
             {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-            {showPipeline && <PipelineModal onClose={() => setShowPipeline(false)} />}
+            {showPipeline && <PipelineModal onClose={() => setShowPipeline(false)} onNodesChanged={syncTokenUsageEnabled} />}
+            {showUsage && (
+                <UsageModal
+                    repoName={selectedRepo?.name ?? null}
+                    summary={usageSummary}
+                    loading={usageLoading}
+                    error={usageError}
+                    onRefresh={() => { void loadUsage(); }}
+                    onClose={() => setShowUsage(false)}
+                />
+            )}
             {showInstallTools && (
                 <InstallToolsModal onClose={() => { setShowInstallTools(false); api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { }); }} />
             )}

@@ -46,6 +46,31 @@ CREATE TABLE IF NOT EXISTS session_logs (
   created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS session_usage_totals (
+  session_id     INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  context_tokens INTEGER NOT NULL DEFAULT 0,
+  input_tokens   INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens  INTEGER NOT NULL DEFAULT 0,
+  output_tokens  INTEGER NOT NULL DEFAULT 0,
+  total_tokens   INTEGER NOT NULL DEFAULT 0,
+  updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS repo_usage_rollups (
+  repo_id         INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+  agent_type      TEXT    NOT NULL,
+  credential_key  TEXT    NOT NULL,
+  credential_id   INTEGER,
+  credential_name TEXT    NOT NULL,
+  context_tokens  INTEGER NOT NULL DEFAULT 0,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens   INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  total_tokens    INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (repo_id, agent_type, credential_key)
+);
+
 CREATE TABLE IF NOT EXISTS md_files (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   scope      TEXT    NOT NULL CHECK(scope IN ('central','repo')),

@@ -90,7 +90,10 @@ export class AutomationService {
 
   delete(id: number): void {
     this.stop(id);
-    this.db.prepare('DELETE FROM automation_tasks WHERE id = ?').run(id);
+    const result = this.db.prepare('DELETE FROM automation_tasks WHERE id = ?').run(id);
+    if (result.changes === 0) {
+      throw new Error(`Automation task ${id} not found`);
+    }
   }
 
   startAll(): void {

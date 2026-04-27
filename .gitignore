@@ -13,6 +13,7 @@ packages/backend/data/
 
 # Electron build output
 packages/electron/release/
+install/release/
 
 # Environment
 .env

@@ -20,6 +20,45 @@ export interface PipelineNodeDto {
   enabled: boolean;
 }
 
+export interface UsageTotals {
+  context_tokens: number;
+  input_tokens: number;
+  prompt_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+export interface SessionUsageRow extends UsageTotals {
+  session_id: number;
+  repo_id: number;
+  repo_name: string;
+  session_name: string;
+  agent_type: string;
+  credential_id: number | null;
+  credential_name: string;
+  status: 'running' | 'stopped';
+  state: 'working' | 'idle' | 'stopped';
+  updated_at: string;
+}
+
+export interface AgentUsageRow extends UsageTotals {
+  agent_type: string;
+}
+
+export interface CredentialUsageRow extends UsageTotals {
+  credential_key: string;
+  credential_id: number | null;
+  credential_name: string;
+}
+
+export interface UsageSummary {
+  repo_id: number | null;
+  totals: UsageTotals;
+  sessions: SessionUsageRow[];
+  by_agent: AgentUsageRow[];
+  by_credential: CredentialUsageRow[];
+}
+
 // Shared types mirroring backend DB models
 export interface Repo {
   id: number;
@@ -28,6 +67,7 @@ export interface Repo {
   source: 'local' | 'git';
   git_url: string | null;
   created_at: string;
+  is_git_repo: boolean;
 }
 
 export interface Session {
@@ -106,6 +146,8 @@ export const api = {
     discover: () => request<{ name: string; path: string }[]>('/repos/discovered'),
     create: (body: { path?: string; gitUrl?: string; name?: string }) =>
       request<Repo>('/repos', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id: number, body: { name: string }) =>
+      request<Repo>(`/repos/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id: number, deleteFromDisk = false) =>
       request<{ ok: boolean }>(`/repos/${id}?deleteFromDisk=${deleteFromDisk}`, { method: 'DELETE' }),
 
@@ -113,8 +155,12 @@ export const api = {
       list: (repoId: number) => request<Session[]>(`/repos/${repoId}/sessions`),
       create: (repoId: number, body: { name: string; agentType: string; credentialId?: number }) =>
         request<Session>(`/repos/${repoId}/sessions`, { method: 'POST', body: JSON.stringify(body) }),
+      update: (repoId: number, sid: number, body: { name: string }) =>
+        request<Session>(`/repos/${repoId}/sessions/${sid}`, { method: 'PUT', body: JSON.stringify(body) }),
       delete: (repoId: number, sid: number) =>
         request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}`, { method: 'DELETE' }),
+      restart: (repoId: number, sid: number) =>
+        request<Session>(`/repos/${repoId}/sessions/${sid}/restart`, { method: 'POST' }),
 
       mdRefs: {
         get: (repoId: number, sid: number) =>
@@ -211,5 +257,14 @@ export const api = {
     pause: (id: number) => request<AutomationTask>(`/automation/${id}/pause`, { method: 'PUT' }),
     resume: (id: number) => request<AutomationTask>(`/automation/${id}/resume`, { method: 'PUT' }),
     delete: (id: number) => request<{ ok: boolean }>(`/automation/${id}`, { method: 'DELETE' }),
+  },
+
+  usage: {
+    summary: (repoId?: number) => {
+      const params = new URLSearchParams();
+      if (repoId !== undefined) params.set('repoId', String(repoId));
+      const qs = params.toString();
+      return request<UsageSummary>(`/usage${qs ? `?${qs}` : ''}`);
+    },
   },
 };

@@ -59,6 +59,12 @@ refreshWindowsPath();
 /** Returns true when running from source (not a packaged build). */
 const isDev = !app.isPackaged;
 
+if (isDev) {
+  const devUserData = path.join(app.getPath('appData'), 'Hive-dev');
+  app.setPath('userData', devUserData);
+  app.setPath('sessionData', path.join(devUserData, 'Session Data'));
+}
+
 /**
  * Derives a stable, machine-unique password for credential encryption.
  * Stored data can only be decrypted on the same machine — intentional.
@@ -88,18 +94,60 @@ function findFreePort(preferred = 3000): Promise<number> {
   });
 }
 
+function getVsCodeFileUri(targetPath: string): string {
+  return `vscode://file/${encodeURI(path.resolve(targetPath).replace(/\\/g, '/'))}`;
+}
+
 /** Polls /api/health until the backend is ready or we give up. */
-async function waitForBackend(port: number, attempts = 40): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
+function pushBackendLog(source: 'stdout' | 'stderr', chunk: Buffer): void {
+  const text = chunk.toString();
+  const output = source === 'stdout' ? process.stdout : process.stderr;
+  output.write(`[backend] ${text}`);
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  backendStartupLogs.push(...lines.map((line) => `${source}: ${line}`));
+  if (backendStartupLogs.length > 40) {
+    backendStartupLogs.splice(0, backendStartupLogs.length - 40);
+  }
+}
+
+function formatBackendStartupMessage(message: string): string {
+  if (backendStartupLogs.length === 0) return message;
+
+  return `${message}\n\nRecent backend logs:\n${backendStartupLogs.slice(-10).join('\n')}`;
+}
+
+async function waitForBackend(port: number, timeoutMs = 60000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (backendStartupFailure) {
+      throw new Error(backendStartupFailure);
+    }
+
+    if (!backend) {
+      throw new Error(formatBackendStartupMessage('Backend exited before it became ready.'));
+    }
+
     try {
       const res = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (res.ok) return;
     } catch {
       /* not ready yet */
     }
-    await new Promise((r) => setTimeout(r, 400));
+
+    await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error(`Backend did not become ready on port ${port}`);
+
+  throw new Error(
+    formatBackendStartupMessage(
+      `Backend did not become ready on port ${port} within ${Math.round(timeoutMs / 1000)} seconds.`
+    )
+  );
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -108,6 +156,8 @@ let mainWindow: BrowserWindow | null = null;
 let backend: UtilityProcess | null = null;
 let backendPort = 3000;
 let tray: Tray | null = null;
+let backendStartupFailure: string | null = null;
+let backendStartupLogs: string[] = [];
 
 // Flag to distinguish user-initiated quit from unexpected backend crash
 let appIsQuitting = false;
@@ -179,6 +229,8 @@ function setupTray(): void {
 async function startBackend(): Promise<number> {
   const port = await findFreePort(3000);
   backendPort = port;
+  backendStartupFailure = null;
+  backendStartupLogs = [];
 
   /**
    * Resolve the backend entry script path:
@@ -197,7 +249,7 @@ async function startBackend(): Promise<number> {
   fs.mkdirSync(dataDir, { recursive: true });
 
   backend = utilityProcess.fork(backendEntry, [], {
-    serviceName: 'aw-backend',
+    serviceName: 'hive-backend',
     stdio: 'pipe',
     env: {
       ...process.env,
@@ -209,19 +261,20 @@ async function startBackend(): Promise<number> {
     },
   });
 
-  backend.stdout?.on('data', (d: Buffer) =>
-    process.stdout.write(`[backend] ${d}`)
-  );
-  backend.stderr?.on('data', (d: Buffer) =>
-    process.stderr.write(`[backend] ${d}`)
-  );
+  backend.stdout?.on('data', (d: Buffer) => pushBackendLog('stdout', d));
+  backend.stderr?.on('data', (d: Buffer) => pushBackendLog('stderr', d));
 
   backend.on('exit', (code) => {
     console.log(`[backend] exited with code ${code}`);
+    if (!appIsQuitting) {
+      backendStartupFailure = formatBackendStartupMessage(
+        `Backend exited during startup (code ${code ?? 'unknown'}).`
+      );
+    }
     backend = null;
     if (mainWindow && !appIsQuitting) {
       dialog.showErrorBox(
-        'AI Workspace — Backend stopped',
+        'Hive — Backend stopped',
         `The backend process exited unexpectedly (code ${code}). The application will quit.`
       );
       app.quit();
@@ -338,6 +391,19 @@ ipcMain.handle('window:toggle-fullscreen', (event) => {
   return setWindowFullscreen(window, !window.isFullScreen());
 });
 
+ipcMain.handle('system:open-in-vscode', async (_event, targetPath: string) => {
+  if (typeof targetPath !== 'string' || !targetPath.trim()) {
+    throw new Error('A repository path is required to open VS Code.');
+  }
+
+  const resolvedPath = path.resolve(targetPath);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Repository path does not exist: ${resolvedPath}`);
+  }
+
+  await shell.openExternal(getVsCodeFileUri(resolvedPath));
+});
+
 app.on('ready', async () => {
   try {
     setupTray();
@@ -350,7 +416,7 @@ app.on('ready', async () => {
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    dialog.showErrorBox('AI Workspace — Startup failed', msg);
+    dialog.showErrorBox('Hive — Startup failed', msg);
     app.quit();
   }
 });

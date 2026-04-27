@@ -13,10 +13,13 @@
         "@hono/node-server": "^1.13.7",
         "better-sqlite3": "^11.9.1",
         "chokidar": "^3.6.0",
+        "cron-parser": "^5.5.0",
         "dotenv": "^16.4.7",
         "hono": "^4.7.7",
+        "node-cron": "^4.2.1",
         "node-pty": "^1.0.0",
         "simple-git": "^3.27.0",
+        "yaml": "^2.8.3",
         "ws": "^8.18.1"
     },
     "devDependencies": {
@@ -33,9 +36,12 @@
         "copyright": "Copyright © 2026",
         "electronVersion": "34.5.8",
         "asar": false,
-        "npmRebuild": false,
+        "npmRebuild": true,
+        "beforeBuild": "scripts/before-build.cjs",
         "files": [
             "dist/**/*",
+            "assets/**/*",
+            "node_modules/**/*",
             {
                 "from": "../backend/dist",
                 "to": "backend"
@@ -46,7 +52,7 @@
             }
         ],
         "directories": {
-            "output": "release"
+            "output": "../../install/release"
         },
         "win": {
             "signingHashAlgorithms": [],

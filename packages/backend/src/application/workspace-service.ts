@@ -37,6 +37,11 @@ export class WorkspaceService {
     return this.repoManager.get(id);
   }
 
+  updateRepo(id: number, input: { name: string }) {
+    this.repoManager.get(id);
+    return this.repoManager.rename(id, input.name);
+  }
+
   async createRepo(input: { path?: string; gitUrl?: string; name?: string }) {
     let repo;
     if (input.gitUrl) {
@@ -66,6 +71,30 @@ export class WorkspaceService {
   listSessions(repoId: number) {
     this.repoManager.get(repoId);
     return this.sessionStore.list(repoId);
+  }
+
+  updateSession(repoId: number, sessionId: number, input: { name: string }) {
+    this.repoManager.get(repoId);
+    const session = this.sessionStore.get(sessionId);
+    if (session.repo_id !== repoId) {
+      throw new Error(`Session ${sessionId} does not belong to repo ${repoId}`);
+    }
+
+    return this.sessionStore.update(sessionId, { name: input.name });
+  }
+
+  restartSession(repoId: number, sessionId: number) {
+    this.repoManager.get(repoId);
+    const session = this.sessionStore.get(sessionId);
+    if (session.repo_id !== repoId) {
+      throw new Error(`Session ${sessionId} does not belong to repo ${repoId}`);
+    }
+
+    killProcess(sessionId);
+    this.sessionStore.clearLogs(sessionId);
+    this.sessionStore.setStatus(sessionId, 'stopped');
+    this.sessionStore.setState(sessionId, 'stopped');
+    return this.sessionStore.get(sessionId);
   }
 
   createSession(input: {

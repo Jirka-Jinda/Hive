@@ -34,6 +34,18 @@ export class SessionStore {
     return this.get(result.lastInsertRowid as number);
   }
 
+  update(id: number, changes: { name?: string }): Session {
+    const current = this.get(id);
+    const nextName = changes.name?.trim() ?? current.name;
+    if (!nextName) throw new Error('Session name is required');
+
+    this.db
+      .prepare("UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(nextName, id);
+
+    return this.get(id);
+  }
+
   setStatus(id: number, status: 'running' | 'stopped'): void {
     this.db
       .prepare("UPDATE sessions SET status = ?, updated_at = datetime('now') WHERE id = ?")
@@ -50,6 +62,10 @@ export class SessionStore {
     this.db
       .prepare('INSERT INTO session_logs (session_id, output) VALUES (?, ?)')
       .run(sessionId, output);
+  }
+
+  clearLogs(sessionId: number): void {
+    this.db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(sessionId);
   }
 
   /** Returns last `limit` log chunks in chronological order for scrollback replay. */

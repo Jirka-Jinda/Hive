@@ -1,11 +1,77 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
-import type { Repo } from '../../api/client';
+import type { MdFile, Repo } from '../../api/client';
 import MdFilePicker from './MdFilePicker';
 
+function RepoIcon({ isGitRepo, className = 'w-4 h-4' }: { isGitRepo: boolean; className?: string }) {
+    if (isGitRepo) {
+        return (
+            <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <circle cx="7" cy="5.5" r="2" />
+                <circle cx="17" cy="8.5" r="2" />
+                <circle cx="7" cy="18.5" r="2" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5.5v7a4 4 0 004 4h2" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.5a4 4 0 004 4h2" />
+            </svg>
+        );
+    }
+
+    return (
+        <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.75 7.75A1.75 1.75 0 015.5 6h4.02c.46 0 .9.18 1.22.51l1.25 1.23c.33.33.77.51 1.23.51h5.28a1.75 1.75 0 011.75 1.75v6.25A1.75 1.75 0 0118.5 18H5.5a1.75 1.75 0 01-1.75-1.75v-8.5z"
+            />
+        </svg>
+    );
+}
+
+function EditIcon() {
+    return (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.86 4.49a2.1 2.1 0 112.97 2.97L9 18.3l-4 1 1-4L16.86 4.49z" />
+        </svg>
+    );
+}
+
+function ActionButton({
+    title,
+    onClick,
+    children,
+    tone = 'default',
+    visible,
+    disabled = false,
+}: {
+    title: string;
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    children: React.ReactNode;
+    tone?: 'default' | 'danger';
+    visible: boolean;
+    disabled?: boolean;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className={`inline-flex items-center justify-center w-6 h-6 rounded-md ml-1 shrink-0 transition-all ${visible
+                ? tone === 'danger'
+                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-900/45 hover:text-white'
+                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
+                : tone === 'danger'
+                    ? 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-red-300 hover:bg-red-950/50'
+                    : 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-orange-200 hover:bg-white/10'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+            title={title}
+        >
+            {children}
+        </button>
+    );
+}
+
 export default function RepoList() {
-    const { repos, selectedRepo, setRepos, setSelectedRepo, setSessions, setMdFiles, mdFiles } =
+    const { repos, selectedRepo, setRepos, setSelectedRepo, updateRepo, setSessions, setMdFiles, mdFiles } =
         useAppStore();
     const [showAdd, setShowAdd] = useState(false);
     const [isGit, setIsGit] = useState(false);
@@ -24,6 +90,10 @@ export default function RepoList() {
     const [confirmRemoveId, setConfirmRemoveId] = useState<number | null>(null);
     const [removing, setRemoving] = useState(false);
     const [deleteFromDisk, setDeleteFromDisk] = useState(false);
+    const [editingRepoId, setEditingRepoId] = useState<number | null>(null);
+    const [editingRepoName, setEditingRepoName] = useState('');
+    const [editingRepoRefs, setEditingRepoRefs] = useState<number[]>([]);
+    const [savingEdit, setSavingEdit] = useState(false);
 
     // Fetch discovered repos whenever the local-path tab is active and form is open
     useEffect(() => {
@@ -111,6 +181,51 @@ export default function RepoList() {
         }
     };
 
+    const startEditingRepo = async (repo: Repo) => {
+        if (selectedRepo?.id !== repo.id) return;
+        setErrorMsg('');
+        try {
+            const refs = await api.repos.mdRefs.get(repo.id);
+            if (useAppStore.getState().selectedRepo?.id !== repo.id) return;
+            setRepoRefs(refs);
+            setEditingRepoRefs(refs.map((file) => file.id));
+        } catch {
+            setEditingRepoRefs(repoRefs.map((file) => file.id));
+        }
+        setEditingRepoId(repo.id);
+        setEditingRepoName(repo.name);
+    };
+
+    const cancelEditingRepo = () => {
+        setEditingRepoId(null);
+        setEditingRepoName('');
+        setEditingRepoRefs([]);
+    };
+
+    const saveRepoEdit = async () => {
+        if (!selectedRepo || editingRepoId !== selectedRepo.id) return;
+        const nextName = editingRepoName.trim();
+        if (!nextName) {
+            setErrorMsg('Repository name is required');
+            return;
+        }
+
+        setSavingEdit(true);
+        setErrorMsg('');
+        try {
+            const updatedRepo = await api.repos.update(selectedRepo.id, { name: nextName });
+            await api.repos.mdRefs.set(selectedRepo.id, editingRepoRefs);
+            const refs = await api.repos.mdRefs.get(selectedRepo.id);
+            updateRepo(updatedRepo);
+            setRepoRefs(refs);
+            cancelEditingRepo();
+        } catch (e: unknown) {
+            setErrorMsg(e instanceof Error ? e.message : 'Failed to update repository');
+        } finally {
+            setSavingEdit(false);
+        }
+    };
+
     return (
         <div className="p-2">
             <div className="flex items-center justify-between mb-1.5">
@@ -177,7 +292,12 @@ export default function RepoList() {
                                         : 'text-gray-300 hover:bg-gray-700'
                                         }`}
                                 >
-                                    <span className="text-gray-400 shrink-0">◈</span>
+                                    <span className={`inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-md ${selectedPath === d.path
+                                        ? 'bg-black/20 ring-1 ring-black/10 text-white'
+                                        : 'text-gray-400'
+                                        }`}>
+                                        <RepoIcon isGitRepo={true} />
+                                    </span>
                                     <span className="truncate">{d.name}</span>
                                 </li>
                             ))}
@@ -233,6 +353,7 @@ export default function RepoList() {
                 {repos.map((repo) => {
                     const isActive = selectedRepo?.id === repo.id;
                     const isPendingRemove = confirmRemoveId === repo.id;
+                    const isEditing = editingRepoId === repo.id;
                     return (
                         <li
                             key={repo.id}
@@ -276,22 +397,42 @@ export default function RepoList() {
                                 ) : (
                                     <>
                                         <div className="flex items-center gap-1.5 min-w-0">
-                                            <span className="text-gray-500 text-xs shrink-0">
-                                                {repo.source === 'git' ? '⧡' : '◈'}
+                                            <span className={`inline-flex items-center justify-center w-5 h-5 shrink-0 rounded-md ${isActive
+                                                ? 'bg-black/20 ring-1 ring-black/10 text-white shadow-sm'
+                                                : 'text-gray-300 group-hover:text-gray-100'
+                                                }`}>
+                                                <RepoIcon isGitRepo={repo.is_git_repo} className="w-4 h-4" />
                                             </span>
                                             <span className="truncate">{repo.name}</span>
                                         </div>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setConfirmRemoveId(repo.id); }}
-                                            className="inline-flex items-center justify-center w-5 h-5 rounded text-gray-600 hover:text-red-400 hover:bg-red-950/40 ml-1 shrink-0 opacity-0 group-hover:opacity-100 transition-all text-sm"
-                                            title="Remove repository"
-                                        >
-                                            ×
-                                        </button>
+                                        <div className="flex items-center shrink-0">
+                                            <ActionButton
+                                                title="Update repository"
+                                                visible={isActive}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (isEditing) {
+                                                        cancelEditingRepo();
+                                                        return;
+                                                    }
+                                                    void startEditingRepo(repo);
+                                                }}
+                                            >
+                                                <EditIcon />
+                                            </ActionButton>
+                                            <ActionButton
+                                                title="Remove repository"
+                                                visible={isActive}
+                                                tone="danger"
+                                                onClick={(e) => { e.stopPropagation(); setConfirmRemoveId(repo.id); }}
+                                            >
+                                                <span className="text-sm leading-none">×</span>
+                                            </ActionButton>
+                                        </div>
                                     </>
                                 )}
                             </div>
-                            {isActive && repoRefs.length > 0 && (
+                            {isActive && !isEditing && repoRefs.length > 0 && (
                                 <div className="px-2 pb-1.5 flex flex-wrap gap-1">
                                     {repoRefs.map((f) => (
                                         <span
@@ -302,6 +443,38 @@ export default function RepoList() {
                                             {f.path.split(/[/\\]/).pop()}
                                         </span>
                                     ))}
+                                </div>
+                            )}
+                            {isActive && isEditing && (
+                                <div className="px-2 pb-2 space-y-2">
+                                    <input
+                                        className="w-full bg-gray-950/80 border border-orange-500/30 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                        value={editingRepoName}
+                                        onChange={(e) => setEditingRepoName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && void saveRepoEdit()}
+                                        placeholder="Repository name"
+                                    />
+                                    <MdFilePicker
+                                        files={mdFiles.filter((file) => file.scope === 'central' && file.type !== 'prompt')}
+                                        selected={editingRepoRefs}
+                                        onChange={setEditingRepoRefs}
+                                        label="Context files"
+                                    />
+                                    <div className="flex gap-1.5">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); void saveRepoEdit(); }}
+                                            disabled={savingEdit}
+                                            className="flex-1 text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            {savingEdit ? 'Saving…' : 'Save'}
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); cancelEditingRepo(); }}
+                                            className="text-xs px-3 py-1.5 rounded-md border border-gray-700 bg-gray-800 text-gray-300 hover:text-white font-medium transition-all"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </li>

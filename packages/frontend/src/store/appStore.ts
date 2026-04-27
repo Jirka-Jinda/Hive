@@ -14,6 +14,7 @@ interface AppState {
   selectedRepo: Repo | null;
   sessions: Session[];
   selectedSession: Session | null;
+  sessionTerminalVersions: Record<number, number>;
   agents: Agent[];
   credentials: Credential[];
   mdFiles: MdFile[];
@@ -25,8 +26,11 @@ interface AppState {
 
   setRepos: (repos: Repo[]) => void;
   setSelectedRepo: (repo: Repo | null) => void;
+  updateRepo: (repo: Repo) => void;
   setSessions: (sessions: Session[]) => void;
   setSelectedSession: (session: Session | null) => void;
+  updateSession: (session: Session) => void;
+  bumpSessionTerminalVersion: (sessionId: number) => void;
   setAgents: (agents: Agent[]) => void;
   setCredentials: (credentials: Credential[]) => void;
   setMdFiles: (files: MdFile[]) => void;
@@ -45,6 +49,7 @@ export const useAppStore = create<AppState>((set) => ({
   selectedRepo: null,
   sessions: [],
   selectedSession: null,
+  sessionTerminalVersions: {},
   agents: [],
   credentials: [],
   mdFiles: [],
@@ -70,9 +75,26 @@ export const useAppStore = create<AppState>((set) => ({
         activeView,
       };
     }),
+  updateRepo: (repo) =>
+    set((state) => ({
+      repos: state.repos.map((existing) => (existing.id === repo.id ? repo : existing)),
+      selectedRepo: state.selectedRepo?.id === repo.id ? repo : state.selectedRepo,
+    })),
   setSessions: (sessions) => set({ sessions }),
   setSelectedSession: (session) =>
     set({ selectedSession: session, activeView: 'terminal' }),
+  updateSession: (session) =>
+    set((state) => ({
+      sessions: state.sessions.map((existing) => (existing.id === session.id ? session : existing)),
+      selectedSession: state.selectedSession?.id === session.id ? session : state.selectedSession,
+    })),
+  bumpSessionTerminalVersion: (sessionId) =>
+    set((state) => ({
+      sessionTerminalVersions: {
+        ...state.sessionTerminalVersions,
+        [sessionId]: (state.sessionTerminalVersions[sessionId] ?? 0) + 1,
+      },
+    })),
   setAgents: (agents) => set({ agents }),
   setCredentials: (credentials) => set({ credentials }),
   setMdFiles: (files) => set({ mdFiles: files }),
@@ -86,6 +108,10 @@ export const useAppStore = create<AppState>((set) => ({
       const sessions = s.sessions.map((sess) =>
         sess.id === sessionId ? { ...sess, state } : sess
       );
+      const selectedSession =
+        s.selectedSession?.id === sessionId
+          ? { ...s.selectedSession, state }
+          : s.selectedSession;
       // Push notification only when idle and session is not currently selected
       const isSelected = s.selectedSession?.id === sessionId;
       if (state === 'idle' && !isSelected) {
@@ -96,9 +122,9 @@ export const useAppStore = create<AppState>((set) => ({
           state,
           timestamp: Date.now(),
         };
-        return { sessions, notifications: [...s.notifications, notification] };
+        return { sessions, selectedSession, notifications: [...s.notifications, notification] };
       }
-      return { sessions };
+      return { sessions, selectedSession };
     }),
 
   pushNotification: (notification) =>

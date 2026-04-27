@@ -12,6 +12,16 @@ export interface Repo {
   source: 'local' | 'git';
   git_url: string | null;
   created_at: string;
+  is_git_repo: boolean;
+}
+
+interface RepoRow {
+  id: number;
+  name: string;
+  path: string;
+  source: 'local' | 'git';
+  git_url: string | null;
+  created_at: string;
 }
 
 export class RepoManager {
@@ -20,14 +30,32 @@ export class RepoManager {
     private readonly settings: SettingsService,
   ) {}
 
+  private toRepo(row: RepoRow): Repo {
+    return {
+      ...row,
+      is_git_repo: existsSync(resolve(row.path, '.git')),
+    };
+  }
+
   list(): Repo[] {
-    return this.db.prepare('SELECT * FROM repos ORDER BY created_at DESC').all() as Repo[];
+    const rows = this.db.prepare('SELECT * FROM repos ORDER BY created_at DESC').all() as RepoRow[];
+    return rows.map((row) => this.toRepo(row));
   }
 
   get(id: number): Repo {
-    const row = this.db.prepare('SELECT * FROM repos WHERE id = ?').get(id) as Repo | undefined;
+    const row = this.db.prepare('SELECT * FROM repos WHERE id = ?').get(id) as RepoRow | undefined;
     if (!row) throw new Error(`Repo ${id} not found`);
-    return row;
+    return this.toRepo(row);
+  }
+
+  rename(id: number, name: string): Repo {
+    const nextName = name.trim();
+    if (!nextName) throw new Error('Repo name is required');
+
+    const result = this.db.prepare('UPDATE repos SET name = ? WHERE id = ?').run(nextName, id);
+    if (result.changes === 0) throw new Error(`Repo ${id} not found`);
+
+    return this.get(id);
   }
 
   async addLocal(repoPath: string, name?: string): Promise<Repo> {

@@ -86,7 +86,7 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   claude: {
     name: 'Claude CLI',
     command: 'claude',
-    idlePattern: /^(>|claude>)\s*$/m,
+    idlePattern: /^\s*(>|claude>)\s*$/,
     buildArgs: () => [],
     envVars: (env = {}) => ({
       ANTHROPIC_API_KEY: env['ANTHROPIC_API_KEY'] ?? '',
@@ -95,7 +95,7 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   copilot: {
     name: 'GitHub Copilot CLI',
     command: 'copilot',
-    idlePattern: /^(>|\?|copilot>)\s/m,
+    idlePattern: /^\s*(>|\?|copilot>)\s*$/,
     buildArgs: () => [],
     // The copilot binary checks tokens in order: COPILOT_GITHUB_TOKEN >
     // GH_TOKEN > GITHUB_TOKEN > OS keychain (set by `copilot login`) > gh auth token.
@@ -106,7 +106,7 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
     // where the user authenticated via browser device-flow (`copilot login`).
     envVars: (env = {}) => {
       const token = env['COPILOT_GITHUB_TOKEN'];
-      if (!token) return {};
+      if (!token) return {} as Record<string, string>;
       return {
         COPILOT_GITHUB_TOKEN: token,
         GH_TOKEN: token,
@@ -133,7 +133,7 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
     name: 'Codex CLI',
     command: 'codex',
     // Matches the bare prompt line rendered by the Codex TUI after ANSI stripping
-    idlePattern: /^\s*[>❯]\s*$/m,
+    idlePattern: /^\s*[>❯]\s*$/,
     buildArgs: () => [],
     envVars: (env = {}) => ({
       OPENAI_API_KEY: env['OPENAI_API_KEY'] ?? '',

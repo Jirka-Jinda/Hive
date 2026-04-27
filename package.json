@@ -9,12 +9,18 @@
         "build": "npm run build --workspace=packages/frontend && npm run build --workspace=packages/backend",
         "start": "npm run start --workspace=packages/backend",
         "electron:dev": "concurrently -n backend,frontend,electron -c cyan,magenta,yellow \"npm run dev --workspace=packages/backend\" \"npm run dev --workspace=packages/frontend\" \"wait-on http://127.0.0.1:5173 && npx tsc --project packages/electron/tsconfig.json && electron packages/electron/dist/main.js\"",
+        "electron:clean": "node -e \"const fs = require('node:fs'); fs.rmSync('install/release', { recursive: true, force: true }); fs.rmSync('packages/electron/release', { recursive: true, force: true });\"",
         "electron:build": "npm run build && npx tsc --project packages/electron/tsconfig.json",
-        "electron:pack": "npm run electron:build && npm run pack --workspace=packages/electron",
-        "electron:dist": "npm run electron:build && npm run dist --workspace=packages/electron"
+        "electron:pack": "npm run electron:clean && npm run electron:build && npm run pack --workspace=packages/electron",
+        "electron:dist": "npm run electron:clean && npm run electron:build && npm run dist --workspace=packages/electron"
     },
     "devDependencies": {
+        "@electron/rebuild": "^4.0.1",
+        "@types/node": "^22.14.0",
         "concurrently": "^9.1.0",
+        "electron": "34.5.8",
+        "electron-builder": "24.13.3",
+        "typescript": "^5.8.3",
         "wait-on": "^8.0.3"
     }
 }

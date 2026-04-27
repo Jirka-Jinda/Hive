@@ -17,6 +17,7 @@ vi.mock('../utils/config', () => ({
     DATA_DIR: TEST_DATA_DIR,
     PROJECT_ROOT: TEST_DATA_DIR,
     REPOS_DIR: './repos',
+    CENTRAL_MD_DIR: join(TEST_DATA_DIR, 'central'),
     MASTER_PASSWORD: 'test-master-password-1234',
     PORT: 3001,
     NODE_ENV: 'test',
@@ -32,13 +33,23 @@ import { reposRouter } from '../routes/repos';
 import { credentialsRouter } from '../routes/credentials';
 import { agentsRouter } from '../routes/agents';
 import { mdfilesRouter } from '../routes/mdfiles';
+import { usageRouter } from '../routes/usage';
+import { settingsRouter } from '../routes/settings';
+import { pipelineRouter } from '../routes/pipeline';
+import { toolsRouter } from '../routes/tools';
+import { automationRouter } from '../routes/automation';
 import { MdFileManager } from '../services/mdfile-manager';
 import { SettingsService } from '../services/settings-service';
 import { SessionStore } from '../services/session-store';
 import { RepoManager } from '../services/repo-manager';
 import { CredentialStore } from '../services/credential-store';
 import { MdRefService } from '../services/md-ref-service';
+import { UsageService } from '../services/usage-service';
+import { TokenCounterService } from '../services/token-counter-service';
+import { AutomationService } from '../services/automation-service';
 import { WorkspaceService } from '../application/workspace-service';
+import { PipelineRegistry } from '../pipeline/pipeline-registry';
+import { createTokenUsageNode } from '../pipeline/nodes/token-usage.node';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -54,6 +65,12 @@ function makeTestApp() {
   const credentialStore = new CredentialStore(db);
   const mdRefService = new MdRefService(db);
   const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
+  const usageService = new UsageService(db);
+  const pipelineRegistry = new PipelineRegistry(settingsService);
+  const tokenCounter = new TokenCounterService();
+  const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager);
+
+  pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));
 
   const app = new Hono();
   app.get('/api/health', (c) =>
@@ -63,6 +80,11 @@ function makeTestApp() {
   app.route('/api/credentials', credentialsRouter(credentialStore));
   app.route('/api/agents', agentsRouter());
   app.route('/api/mdfiles', mdfilesRouter(mdMgr));
+  app.route('/api/usage', usageRouter(usageService, repoManager));
+  app.route('/api/settings', settingsRouter(settingsService));
+  app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
+  app.route('/api/tools', toolsRouter());
+  app.route('/api/automation', automationRouter(automationService));
   return app;
 }
 
@@ -186,7 +208,22 @@ describe('Repos API', () => {
     expect(repo.name).toBe('test-repo');
     expect(repo.source).toBe('local');
     expect(repo.git_url).toBeNull();
+    expect(repo.is_git_repo).toBe(false);
     repoId = repo.id;
+  });
+
+  it('GET /api/repos/:id — returns the created repo', async () => {
+    const res = await req(app, `/api/repos/${repoId}`);
+    expect(res.status).toBe(200);
+    const repo = await res.json();
+    expect(repo.id).toBe(repoId);
+    expect(repo.name).toBe('test-repo');
+  });
+
+  it('GET /api/repos/:id — 404 for unknown repo', async () => {
+    const res = await req(app, '/api/repos/99999');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/repo 99999 not found/i);
   });
 
   it('POST /api/repos — 400 for file path instead of directory', async () => {
@@ -205,12 +242,42 @@ describe('Repos API', () => {
   it('GET /api/repos — newly created repo is in the list', async () => {
     const res = await req(app, '/api/repos');
     const repos = await res.json();
-    expect(repos.some((r: { id: number }) => r.id === repoId)).toBe(true);
+    expect(repos.some((r: { id: number; is_git_repo: boolean }) => r.id === repoId && r.is_git_repo === false)).toBe(true);
+  });
+
+  it('PUT /api/repos/:id — updates repo name', async () => {
+    const res = await req(app, `/api/repos/${repoId}`, {
+      method: 'PUT',
+      body: { name: 'renamed-repo' },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).name).toBe('renamed-repo');
+  });
+
+  it('PUT /api/repos/:id — 400 when name is blank', async () => {
+    const res = await req(app, `/api/repos/${repoId}`, {
+      method: 'PUT',
+      body: { name: '   ' },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/name is required/i);
+  });
+
+  it('GET /api/repos/discovered — returns repos with a .git directory under reposDir', async () => {
+    const discoveredRoot = join(TEST_DATA_DIR, 'repos', 'discovered-repo', '.git');
+    mkdirSync(discoveredRoot, { recursive: true });
+
+    const res = await req(app, '/api/repos/discovered');
+    expect(res.status).toBe(200);
+    const repos = await res.json();
+    expect(repos.some((repo: { name: string }) => repo.name === 'discovered-repo')).toBe(true);
   });
 
   // ── Sessions ─────────────────────────────────────────────────────────────
   describe('Sessions', () => {
     let sessionId = 0;
+    let repoMdFileId = 0;
+    let sessionMdFileId = 0;
 
     it('GET /api/repos/:id/sessions — returns empty array', async () => {
       const res = await req(app, `/api/repos/${repoId}/sessions`);
@@ -249,6 +316,26 @@ describe('Repos API', () => {
       sessionId = session.id;
     });
 
+    it('POST /api/repos/:id/sessions — 400 when credential belongs to a different agent', async () => {
+      const credRes = await req(app, '/api/credentials', {
+        method: 'POST',
+        body: {
+          name: 'copilot-only',
+          agentType: 'copilot',
+          data: { envVars: {} },
+        },
+      });
+      expect(credRes.status).toBe(201);
+      const credential = await credRes.json();
+
+      const res = await req(app, `/api/repos/${repoId}/sessions`, {
+        method: 'POST',
+        body: { name: 'bad credential match', agentType: 'claude', credentialId: credential.id },
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/does not match/i);
+    });
+
     it('POST /api/repos/:id/sessions — 400 for unknown agent type', async () => {
       const res = await req(app, `/api/repos/${repoId}/sessions`, {
         method: 'POST',
@@ -264,6 +351,109 @@ describe('Repos API', () => {
       expect(sessions.some((s: { id: number }) => s.id === sessionId)).toBe(true);
     });
 
+    it('GET /api/repos/:id/md-refs — returns empty repo refs initially', async () => {
+      const res = await req(app, `/api/repos/${repoId}/md-refs`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+    });
+
+    it('GET /api/repos/:id/sessions/:sid/md-refs — returns empty session refs initially', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}/md-refs`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual([]);
+    });
+
+    it('PUT repo and session md-refs — stores references', async () => {
+      const repoFileRes = await req(app, '/api/mdfiles', {
+        method: 'POST',
+        body: { scope: 'central', filename: 'repo-context', content: '# Repo Context', type: 'instruction' },
+      });
+      expect(repoFileRes.status).toBe(201);
+      repoMdFileId = (await repoFileRes.json()).id;
+
+      const sessionFileRes = await req(app, '/api/mdfiles', {
+        method: 'POST',
+        body: { scope: 'central', filename: 'session-context', content: '# Session Context', type: 'instruction' },
+      });
+      expect(sessionFileRes.status).toBe(201);
+      sessionMdFileId = (await sessionFileRes.json()).id;
+
+      const repoRefRes = await req(app, `/api/repos/${repoId}/md-refs`, {
+        method: 'PUT',
+        body: { mdFileIds: [repoMdFileId] },
+      });
+      expect(repoRefRes.status).toBe(200);
+      expect((await repoRefRes.json()).ok).toBe(true);
+
+      const sessionRefRes = await req(app, `/api/repos/${repoId}/sessions/${sessionId}/md-refs`, {
+        method: 'PUT',
+        body: { mdFileIds: [sessionMdFileId] },
+      });
+      expect(sessionRefRes.status).toBe(200);
+      expect((await sessionRefRes.json()).ok).toBe(true);
+
+      const repoRefs = await req(app, `/api/repos/${repoId}/md-refs`);
+      expect((await repoRefs.json()).map((file: { id: number }) => file.id)).toEqual([repoMdFileId]);
+
+      const sessionRefs = await req(app, `/api/repos/${repoId}/sessions/${sessionId}/md-refs`);
+      expect((await sessionRefs.json()).map((file: { id: number }) => file.id)).toEqual([sessionMdFileId]);
+    });
+
+    it('PUT /api/repos/:id/sessions/:sid — updates session name', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}`, {
+        method: 'PUT',
+        body: { name: 'renamed session' },
+      });
+      expect(res.status).toBe(200);
+      expect((await res.json()).name).toBe('renamed session');
+    });
+
+    it('PUT /api/repos/:id/sessions/:sid — 400 when name is blank', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}`, {
+        method: 'PUT',
+        body: { name: '  ' },
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/name is required/i);
+    });
+
+    it('POST /api/repos/:id/sessions/:sid/inject — 404 when session is not running', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}/inject`, {
+        method: 'POST',
+        body: { text: 'hello' },
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/not running/i);
+    });
+
+    it('POST /api/repos/:id/sessions/:sid/restart — resets session to stopped', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}/restart`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(200);
+      const session = await res.json();
+      expect(session.status).toBe('stopped');
+      expect(session.state).toBe('stopped');
+    });
+
+    it('POST /api/repos/:id/sessions/:sid/restart — 404 for mismatched repo/session pair', async () => {
+      mkdirSync(join(TEST_DATA_DIR, 'other-repo'), { recursive: true });
+      const otherRepoRes = await req(app, '/api/repos', {
+        method: 'POST',
+        body: { path: join(TEST_DATA_DIR, 'other-repo'), name: 'other-repo' },
+      });
+      expect(otherRepoRes.status).toBe(201);
+      const otherRepoId = (await otherRepoRes.json()).id;
+
+      const res = await req(app, `/api/repos/${otherRepoId}/sessions/${sessionId}/restart`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/does not belong to repo/i);
+
+      await req(app, `/api/repos/${otherRepoId}`, { method: 'DELETE' });
+    });
+
     it('DELETE /api/repos/:id/sessions/:sid — 200 with ok', async () => {
       const res = await req(app, `/api/repos/${repoId}/sessions/${sessionId}`, {
         method: 'DELETE',
@@ -276,6 +466,13 @@ describe('Repos API', () => {
       const res = await req(app, `/api/repos/${repoId}/sessions`);
       const sessions = await res.json();
       expect(sessions.some((s: { id: number }) => s.id === sessionId)).toBe(false);
+    });
+
+    it('DELETE /api/repos/:id/sessions/:sid — 404 for non-existent session', async () => {
+      const res = await req(app, `/api/repos/${repoId}/sessions/99999`, {
+        method: 'DELETE',
+      });
+      expect(res.status).toBe(404);
     });
   });
 
@@ -348,6 +545,39 @@ describe('Credentials API', () => {
     const res = await req(app, '/api/credentials');
     const creds = await res.json();
     expect(creds.some((c: { id: number }) => c.id === credId)).toBe(true);
+  });
+
+  it('PUT /api/credentials/:id — updates name and agent type metadata', async () => {
+    const res = await req(app, `/api/credentials/${credId}`, {
+      method: 'PUT',
+      body: {
+        name: 'updated-credential',
+        agentType: 'claude',
+        data: { envVars: { ANTHROPIC_API_KEY: 'sk-updated' } },
+      },
+    });
+    expect(res.status).toBe(200);
+    const credential = await res.json();
+    expect(credential.id).toBe(credId);
+    expect(credential.name).toBe('updated-credential');
+    expect(credential.agent_type).toBe('claude');
+  });
+
+  it('PUT /api/credentials/:id — 400 when required fields are missing', async () => {
+    const res = await req(app, `/api/credentials/${credId}`, {
+      method: 'PUT',
+      body: { name: '', agentType: 'claude', data: { envVars: {} } },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/name and agentType are required/i);
+  });
+
+  it('PUT /api/credentials/:id — 404 for non-existent credential', async () => {
+    const res = await req(app, '/api/credentials/99999', {
+      method: 'PUT',
+      body: { name: 'missing', agentType: 'claude', data: { envVars: {} } },
+    });
+    expect(res.status).toBe(404);
   });
 
   it('list response never includes encrypted_data', async () => {
@@ -531,6 +761,236 @@ describe('MD Files API', () => {
 
   it('DELETE /api/mdfiles/:id — 404 for non-existent id', async () => {
     const res = await req(app, '/api/mdfiles/99999', { method: 'DELETE' });
+    expect(res.status).toBe(404);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Settings
+// ══════════════════════════════════════════════════════════════════════════
+describe('Settings API', () => {
+  it('GET /api/settings — returns current settings', async () => {
+    const res = await req(app, '/api/settings');
+    expect(res.status).toBe(200);
+    const settings = await res.json();
+    expect(settings.reposDir).toBe(join(TEST_DATA_DIR, 'repos'));
+    expect(settings.centralMdDir).toBe(join(TEST_DATA_DIR, 'central'));
+  });
+
+  it('PUT /api/settings — updates reposDir, centralMdDir and auth settings', async () => {
+    const nextReposDir = join(TEST_DATA_DIR, 'alt-repos');
+    const nextCentralMdDir = join(TEST_DATA_DIR, 'alt-central');
+    const res = await req(app, '/api/settings', {
+      method: 'PUT',
+      body: {
+        reposDir: nextReposDir,
+        centralMdDir: nextCentralMdDir,
+        auth: { enabled: true, pin: 'MTIzNA==' },
+      },
+    });
+    expect(res.status).toBe(200);
+    const settings = await res.json();
+    expect(settings.reposDir).toBe(nextReposDir);
+    expect(settings.centralMdDir).toBe(nextCentralMdDir);
+    expect(settings.auth).toEqual({ enabled: true, pin: 'MTIzNA==' });
+
+    const readBack = await req(app, '/api/settings');
+    expect(readBack.status).toBe(200);
+    const persisted = await readBack.json();
+    expect(persisted.reposDir).toBe(nextReposDir);
+    expect(persisted.centralMdDir).toBe(nextCentralMdDir);
+    expect(persisted.auth).toEqual({ enabled: true, pin: 'MTIzNA==' });
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Pipeline
+// ══════════════════════════════════════════════════════════════════════════
+describe('Pipeline API', () => {
+  it('GET /api/pipeline — lists registered nodes', async () => {
+    const res = await req(app, '/api/pipeline');
+    expect(res.status).toBe(200);
+    const nodes = await res.json();
+    expect(nodes.some((node: { id: string }) => node.id === 'token-usage')).toBe(true);
+  });
+
+  it('PUT /api/pipeline/:id — toggles a node', async () => {
+    const res = await req(app, '/api/pipeline/token-usage', {
+      method: 'PUT',
+      body: { enabled: false },
+    });
+    expect(res.status).toBe(200);
+    const nodes = await res.json();
+    expect(nodes.find((node: { id: string; enabled: boolean }) => node.id === 'token-usage')?.enabled).toBe(false);
+  });
+
+  it('PUT /api/pipeline/:id — 400 when enabled is not boolean', async () => {
+    const res = await req(app, '/api/pipeline/token-usage', {
+      method: 'PUT',
+      body: { enabled: 'nope' },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/must be a boolean/i);
+  });
+
+  it('PUT /api/pipeline/:id — 404 for unknown node', async () => {
+    const res = await req(app, '/api/pipeline/missing-node', {
+      method: 'PUT',
+      body: { enabled: true },
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Usage
+// ══════════════════════════════════════════════════════════════════════════
+describe('Usage API', () => {
+  let repoId = 0;
+
+  beforeAll(async () => {
+    const repoPath = join(TEST_DATA_DIR, 'usage-repo');
+    mkdirSync(repoPath, { recursive: true });
+    const res = await req(app, '/api/repos', {
+      method: 'POST',
+      body: { path: repoPath, name: 'usage-repo' },
+    });
+    repoId = (await res.json()).id;
+  });
+
+  it('GET /api/usage — returns a summary envelope', async () => {
+    const res = await req(app, '/api/usage');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.repo_id).toBeNull();
+    expect(body).toHaveProperty('totals');
+    expect(Array.isArray(body.sessions)).toBe(true);
+    expect(Array.isArray(body.by_agent)).toBe(true);
+    expect(Array.isArray(body.by_credential)).toBe(true);
+  });
+
+  it('GET /api/usage?repoId=:id — scopes the summary to a repo', async () => {
+    const res = await req(app, `/api/usage?repoId=${repoId}`);
+    expect(res.status).toBe(200);
+    expect((await res.json()).repo_id).toBe(repoId);
+  });
+
+  it('GET /api/usage?repoId=:id — 404 for non-existent repo', async () => {
+    const res = await req(app, '/api/usage?repoId=99999');
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/repo 99999 not found/i);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Tools
+// ══════════════════════════════════════════════════════════════════════════
+describe('Tools API', () => {
+  it('GET /api/tools — returns tool install status for all agents', async () => {
+    const res = await req(app, '/api/tools');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.tools)).toBe(true);
+    expect(typeof body.anyMissing).toBe('boolean');
+    expect(body.tools.length).toBeGreaterThan(0);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// Automation
+// ══════════════════════════════════════════════════════════════════════════
+describe('Automation API', () => {
+  let repoId = 0;
+  let sessionId = 0;
+  let mdFileId = 0;
+  let taskId = 0;
+
+  beforeAll(async () => {
+    const repoPath = join(TEST_DATA_DIR, 'automation-repo');
+    mkdirSync(repoPath, { recursive: true });
+
+    const repoRes = await req(app, '/api/repos', {
+      method: 'POST',
+      body: { path: repoPath, name: 'automation-repo' },
+    });
+    repoId = (await repoRes.json()).id;
+
+    const sessionRes = await req(app, `/api/repos/${repoId}/sessions`, {
+      method: 'POST',
+      body: { name: 'automation-session', agentType: 'claude' },
+    });
+    sessionId = (await sessionRes.json()).id;
+
+    const mdFileRes = await req(app, '/api/mdfiles', {
+      method: 'POST',
+      body: { scope: 'central', filename: 'automation-template', content: 'Run this template', type: 'prompt' },
+    });
+    mdFileId = (await mdFileRes.json()).id;
+  });
+
+  it('GET /api/automation — returns an array', async () => {
+    const res = await req(app, '/api/automation');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(await res.json())).toBe(true);
+  });
+
+  it('POST /api/automation — creates a scheduled task', async () => {
+    const res = await req(app, '/api/automation', {
+      method: 'POST',
+      body: {
+        name: 'Daily summary',
+        md_file_id: mdFileId,
+        session_id: sessionId,
+        cron: '0 * * * *',
+        params: { audience: 'team' },
+      },
+    });
+    expect(res.status).toBe(201);
+    const task = await res.json();
+    expect(task.name).toBe('Daily summary');
+    expect(task.enabled).toBe(1);
+    taskId = task.id;
+  });
+
+  it('POST /api/automation — 400 for invalid cron', async () => {
+    const res = await req(app, '/api/automation', {
+      method: 'POST',
+      body: {
+        name: 'Bad cron',
+        md_file_id: mdFileId,
+        session_id: sessionId,
+        cron: 'not-a-cron',
+      },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/invalid cron/i);
+  });
+
+  it('PUT /api/automation/:id/pause — disables a task', async () => {
+    const res = await req(app, `/api/automation/${taskId}/pause`, { method: 'PUT' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).enabled).toBe(0);
+  });
+
+  it('PUT /api/automation/:id/resume — re-enables a task', async () => {
+    const res = await req(app, `/api/automation/${taskId}/resume`, { method: 'PUT' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).enabled).toBe(1);
+  });
+
+  it('PUT /api/automation/:id/pause — 404 for unknown task', async () => {
+    const res = await req(app, '/api/automation/99999/pause', { method: 'PUT' });
+    expect(res.status).toBe(404);
+  });
+
+  it('DELETE /api/automation/:id — deletes a task', async () => {
+    const res = await req(app, `/api/automation/${taskId}`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+  });
+
+  it('DELETE /api/automation/:id — 404 for unknown task', async () => {
+    const res = await req(app, '/api/automation/99999', { method: 'DELETE' });
     expect(res.status).toBe(404);
   });
 });

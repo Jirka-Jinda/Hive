@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { PipelineRegistry } from '../pipeline/pipeline-registry';
-import { getErrorMessage } from '../utils/errors';
+import { jsonRoute } from './route-utils';
 
 export function pipelineRouter(registry: PipelineRegistry): Hono {
   const app = new Hono();
@@ -15,12 +15,8 @@ export function pipelineRouter(registry: PipelineRegistry): Hono {
     if (typeof body.enabled !== 'boolean') {
       return c.json({ error: '`enabled` must be a boolean' }, 400);
     }
-    try {
-      const updated = registry.setEnabled(id, body.enabled);
-      return c.json(updated);
-    } catch (err: unknown) {
-      return c.json({ error: getErrorMessage(err) }, 404);
-    }
+
+    return jsonRoute(c, () => registry.setEnabled(id, body.enabled), { errorStatus: 404 });
   });
 
   return app;

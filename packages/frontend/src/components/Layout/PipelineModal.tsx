@@ -3,6 +3,7 @@ import { api, type PipelineNodeDto, type PipelinePhase } from '../../api/client'
 
 interface Props {
     onClose: () => void;
+    onNodesChanged?: (nodes: PipelineNodeDto[]) => void;
 }
 
 const PHASE_LABELS: Record<PipelinePhase, string> = {
@@ -17,7 +18,7 @@ const PHASE_COLORS: Record<PipelinePhase, string> = {
     'agent-output': 'bg-emerald-900/60 text-emerald-300 border-emerald-700/60',
 };
 
-export default function PipelineModal({ onClose }: Props) {
+export default function PipelineModal({ onClose, onNodesChanged }: Props) {
     const [nodes, setNodes] = useState<PipelineNodeDto[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -36,6 +37,7 @@ export default function PipelineModal({ onClose }: Props) {
         try {
             const updated = await api.pipeline.setEnabled(node.id, !node.enabled);
             setNodes(updated);
+            onNodesChanged?.(updated);
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'Failed to update node');
         } finally {
@@ -114,6 +116,11 @@ export default function PipelineModal({ onClose }: Props) {
                                 <p className={`text-[11px] mt-0.5 leading-relaxed ${node.enabled ? 'text-gray-500' : 'text-gray-600'}`}>
                                     {node.description}
                                 </p>
+                                {node.id === 'token-usage' && (
+                                    <p className="text-[11px] mt-1 leading-relaxed text-gray-500">
+                                        Disabling this hides the token usage box and stops counting new tokens immediately. Existing totals stay stored.
+                                    </p>
+                                )}
                             </div>
                         </div>
                     ))}

@@ -3,15 +3,32 @@ import type { SessionStore } from '../../services/session-store.js';
 import type { NotificationBus } from '../../services/notification-bus.js';
 import { AGENT_ADAPTERS } from '../../services/agents.js';
 
-// Matches common ANSI escape sequences so we can test the raw text.
-const ANSI_ESCAPE_RE = /\x1B\[[0-9;]*[A-Za-z]|\x1B\][^\x07]*\x07|\x1B[PX^_].*?ST|\x1B[()][AB012]/g;
+// Matches common ANSI / VT escape sequences so we can test the raw text.
+// [0-9;?]* covers both standard and DEC-private-mode CSI params (e.g. \x1B[?25h, \x1B[?2004h).
+const ANSI_ESCAPE_RE = /\x1B\[[0-9;?]*[A-Za-z]|\x1B\][^\x07]*\x07|\x1B[PX^_].*?ST|\x1B[()][AB012]/g;
 
 function stripAnsi(text: string): string {
-  return text.replace(ANSI_ESCAPE_RE, '');
+  // Remove ANSI sequences then strip \r so multiline anchors work on PTY output.
+  return text.replace(ANSI_ESCAPE_RE, '').replace(/\r/g, '');
 }
 
 interface DebounceEntry {
-  timer: ReturnType<typeof setTimeout>;
+  outputTail: string;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+const OUTPUT_TAIL_MAX = 512;
+
+function appendOutputTail(outputTail: string, text: string): string {
+  return `${outputTail}${stripAnsi(text)}`.slice(-OUTPUT_TAIL_MAX);
+}
+
+function getTrailingPromptCandidate(outputTail: string): string {
+  const trimmedTail = outputTail.replace(/\n+$/g, '');
+  if (!trimmedTail) return '';
+
+  const lines = trimmedTail.split('\n');
+  return lines[lines.length - 1] ?? trimmedTail;
 }
 
 export function createSessionStateWatcherNode(
@@ -35,10 +52,10 @@ export function createSessionStateWatcherNode(
       // On user input — cancel any pending idle debounce and mark as working
       if (phase === 'user-input') {
         const entry = debounceMap.get(sessionId);
-        if (entry) {
+        if (entry?.timer) {
           clearTimeout(entry.timer);
-          debounceMap.delete(sessionId);
         }
+        debounceMap.delete(sessionId);
         let sessionName = '';
         try { sessionName = sessionStore.get(sessionId).name; } catch { /* ignore */ }
         sessionStore.setState(sessionId, 'working');
@@ -54,20 +71,33 @@ export function createSessionStateWatcherNode(
         const adapter = AGENT_ADAPTERS[session.agent_type];
         if (!adapter) return text;
 
-        const stripped = stripAnsi(text);
-        if (!adapter.idlePattern.test(stripped)) return text;
+        const entry = debounceMap.get(sessionId) ?? { outputTail: '' };
+        entry.outputTail = appendOutputTail(entry.outputTail, text);
+
+        const promptCandidate = getTrailingPromptCandidate(entry.outputTail);
+        if (!promptCandidate || !adapter.idlePattern.test(promptCandidate)) {
+          if (entry.timer) {
+            clearTimeout(entry.timer);
+            delete entry.timer;
+          }
+          debounceMap.set(sessionId, entry);
+          return text;
+        }
 
         // Debounce: reset the timer on every matching chunk
-        const existing = debounceMap.get(sessionId);
-        if (existing) clearTimeout(existing.timer);
+        if (entry.timer) clearTimeout(entry.timer);
 
-        const timer = setTimeout(() => {
-          debounceMap.delete(sessionId);
+        entry.timer = setTimeout(() => {
+          const latest = debounceMap.get(sessionId);
+          if (latest) {
+            delete latest.timer;
+            debounceMap.set(sessionId, latest);
+          }
           sessionStore.setState(sessionId, 'idle');
           notificationBus.emitSessionState({ sessionId, state: 'idle', sessionName: session.name });
         }, IDLE_DEBOUNCE_MS);
 
-        debounceMap.set(sessionId, { timer });
+        debounceMap.set(sessionId, entry);
       }
 
       return text;

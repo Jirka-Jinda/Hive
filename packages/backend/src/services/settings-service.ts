@@ -55,7 +55,7 @@ export class SettingsService {
     }
     return {
       reposDir: resolve(Config.PROJECT_ROOT, process.env.REPOS_DIR ?? Config.REPOS_DIR),
-      centralMdDir: Config.CENTRAL_MD_DIR,
+      centralMdDir: resolve(Config.PROJECT_ROOT, process.env.CENTRAL_MD_DIR ?? Config.CENTRAL_MD_DIR),
       pipeline: { nodes: pipelineNodes },
       auth,
     };

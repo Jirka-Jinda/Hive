@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { CredentialStore } from '../services/credential-store';
-import { getErrorMessage } from '../utils/errors';
+import { jsonRoute, parseIdParam } from './route-utils';
 
 export function credentialsRouter(store: CredentialStore): Hono {
   const app = new Hono();
@@ -13,34 +13,29 @@ export function credentialsRouter(store: CredentialStore): Hono {
     if (!body.name?.trim() || !body.agentType?.trim()) {
       return c.json({ error: 'name and agentType are required' }, 400);
     }
-    try {
-      return c.json(store.create(body.name.trim(), body.agentType, body.data), 201);
-    } catch (error: unknown) {
-      return c.json({ error: getErrorMessage(error) }, 400);
-    }
+
+    return jsonRoute(c, () => store.create(body.name.trim(), body.agentType, body.data), {
+      successStatus: 201,
+      errorStatus: 400,
+    });
   });
 
   app.put('/:id', async (c) => {
-    const id = parseInt(c.req.param('id'), 10);
+    const id = parseIdParam(c, 'id');
     const body = await c.req.json<{ name: string; agentType: string; data: { envVars: Record<string, string> } }>();
     if (!body.name?.trim() || !body.agentType?.trim()) {
       return c.json({ error: 'name and agentType are required' }, 400);
     }
-    try {
-      return c.json(store.update(id, body.name.trim(), body.agentType, body.data));
-    } catch (error: unknown) {
-      return c.json({ error: getErrorMessage(error) }, 404);
-    }
+
+    return jsonRoute(c, () => store.update(id, body.name.trim(), body.agentType, body.data), {
+      errorStatus: 404,
+    });
   });
 
-  app.delete('/:id', (c) => {
-    try {
-      store.delete(parseInt(c.req.param('id'), 10));
-      return c.json({ ok: true });
-    } catch (error: unknown) {
-      return c.json({ error: getErrorMessage(error) }, 404);
-    }
-  });
+  app.delete('/:id', (c) => jsonRoute(c, () => {
+    store.delete(parseIdParam(c, 'id'));
+    return { ok: true };
+  }, { errorStatus: 404 }));
 
   return app;
 }

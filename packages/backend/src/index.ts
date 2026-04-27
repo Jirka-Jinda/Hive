@@ -27,6 +27,7 @@ import { NotificationBus } from './services/notification-bus';
 import { CentralMdSyncService } from './services/central-md-sync';
 import { PipelineRegistry } from './pipeline/pipeline-registry';
 import { createMdContextNode } from './pipeline/nodes/md-context.node';
+import { createTokenUsageNode } from './pipeline/nodes/token-usage.node';
 import { createSessionStateWatcherNode } from './pipeline/nodes/session-state-watcher.node';
 import { SessionStore } from './services/session-store';
 import { RepoManager } from './services/repo-manager';
@@ -34,6 +35,9 @@ import { CredentialStore } from './services/credential-store';
 import { WorkspaceService } from './application/workspace-service';
 import { AutomationService } from './services/automation-service';
 import { automationRouter } from './routes/automation';
+import { TokenCounterService } from './services/token-counter-service';
+import { UsageService } from './services/usage-service';
+import { usageRouter } from './routes/usage';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const db = openDb(join(Config.DATA_DIR, 'app.db'));
@@ -50,11 +54,14 @@ const repoManager = new RepoManager(db, settingsService);
 const credentialStore = new CredentialStore(db);
 const mdRefService = new MdRefService(db);
 const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
+const tokenCounter = new TokenCounterService();
+const usageService = new UsageService(db);
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
 const notificationBus = new NotificationBus();
 const pipelineRegistry = new PipelineRegistry(settingsService);
 pipelineRegistry.register(createMdContextNode(mdRefService));
+pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));
 pipelineRegistry.register(createSessionStateWatcherNode(sessionStore, notificationBus));
 
 // ── Automation ─────────────────────────────────────────────────────────────
@@ -85,6 +92,7 @@ app.route('/api/settings', settingsRouter(settingsService));
 app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
 app.route('/api/tools', toolsRouter());
 app.route('/api/automation', automationRouter(automationService));
+app.route('/api/usage', usageRouter(usageService, repoManager));
 
 // Static frontend (production only)
 if (Config.NODE_ENV === 'production') {

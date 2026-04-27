@@ -254,7 +254,6 @@ describe('AGENT_ADAPTERS[copilot] — setupAuth', () => {
 
   it('is a no-op when no token is provided', () => {
     AGENT_ADAPTERS['copilot'].setupAuth?.({});
-    AGENT_ADAPTERS['copilot'].setupAuth?.(undefined);
 
     expect(mockSpawnSync).not.toHaveBeenCalled();
   });

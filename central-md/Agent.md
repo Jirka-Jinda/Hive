@@ -1,2 +1,2 @@
-# agent.md
+# copilot-instructions.md
 
