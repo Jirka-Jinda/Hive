@@ -1,4 +1,6 @@
 import type { AgentUsageRow, CredentialUsageRow, SessionUsageRow, UsageSummary, UsageTotals } from '../../api/client';
+import { useModal } from '../../hooks/useModal';
+import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
     repoName: string | null;
@@ -96,14 +98,15 @@ export default function UsageModal({ repoName, summary, loading, error, onRefres
     const topAgent = summary?.by_agent[0] ?? null;
     const topCredential = summary?.by_credential[0] ?? null;
     const scopeLabel = repoName ?? 'All repositories';
+    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-6xl mx-4 max-h-[88vh] flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <div>
                         <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 19h16M7 15l3-3 2 2 5-6" />
                             </svg>
                             <span className="text-sm font-semibold text-gray-200">Token Usage</span>
@@ -113,16 +116,11 @@ export default function UsageModal({ repoName, summary, loading, error, onRefres
                     <div className="flex items-center gap-2">
                         <button
                             onClick={onRefresh}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:text-white hover:border-gray-600 font-medium transition-all"
+                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
                         >
                             Refresh
                         </button>
-                        <button
-                            onClick={onClose}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 font-medium transition-all"
-                        >
-                            Close
-                        </button>
+                        <XCloseButton onClick={onClose} />
                     </div>
                 </div>
 

@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import PinSetup from '../Auth/PinSetup';
+import { useModal } from '../../hooks/useModal';
+import Toggle from '../ui/Toggle';
+import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
     onClose: () => void;
@@ -20,6 +23,7 @@ export default function SettingsModal({ onClose }: Props) {
     const [authSaving, setAuthSaving] = useState(false);
 
     const authEnabled = settings?.auth?.enabled ?? false;
+    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     const handleSave = async () => {
         if (!reposDir.trim()) return;
@@ -39,10 +43,8 @@ export default function SettingsModal({ onClose }: Props) {
 
     const handleToggleAuth = async () => {
         if (!authEnabled) {
-            // Enable: show PIN setup first
             setAuthView('setup');
         } else {
-            // Disable immediately
             setAuthSaving(true);
             try {
                 const updated = await api.settings.update({ auth: { enabled: false, pin: '' } });
@@ -64,11 +66,12 @@ export default function SettingsModal({ onClose }: Props) {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-md mx-4">
                 {/* Header */}
-                <div className="flex items-center px-4 py-3 border-b border-gray-800">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <span className="text-sm font-semibold text-gray-200">App Settings</span>
+                    <XCloseButton onClick={onClose} />
                 </div>
 
                 {/* Body */}
@@ -79,7 +82,7 @@ export default function SettingsModal({ onClose }: Props) {
                             Repositories Folder
                         </label>
                         <input
-                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all font-mono"
+                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all font-mono"
                             placeholder="C:\Code\Automation\repos"
                             value={reposDir}
                             onChange={(e) => { setReposDir(e.target.value); setSaved(false); }}
@@ -97,7 +100,7 @@ export default function SettingsModal({ onClose }: Props) {
                             Central MD Folder
                         </label>
                         <input
-                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all font-mono"
+                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all font-mono"
                             placeholder="C:\Code\Automation\central-md"
                             value={centralMdDir}
                             onChange={(e) => { setCentralMdDir(e.target.value); setSaved(false); }}
@@ -116,13 +119,12 @@ export default function SettingsModal({ onClose }: Props) {
                                 <p className="text-xs font-semibold text-gray-300">PIN Lock</p>
                                 <p className="text-[11px] text-gray-600 mt-0.5">Require a 4-digit PIN on launch.</p>
                             </div>
-                            <button
-                                onClick={handleToggleAuth}
+                            <Toggle
+                                checked={authEnabled}
+                                onChange={() => { void handleToggleAuth(); }}
                                 disabled={authSaving}
-                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 ${authEnabled ? 'bg-amber-500' : 'bg-gray-700'}`}
-                            >
-                                <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${authEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                            </button>
+                                title={authEnabled ? 'Disable PIN lock' : 'Enable PIN lock'}
+                            />
                         </div>
 
                         {authEnabled && authView === 'idle' && (
@@ -156,12 +158,12 @@ export default function SettingsModal({ onClose }: Props) {
                         onClick={onClose}
                         className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 font-medium transition-all"
                     >
-                        Close
+                        Cancel
                     </button>
                     <button
                         onClick={handleSave}
                         disabled={saving || !reposDir.trim()}
-                        className="text-xs px-4 py-1.5 rounded border border-orange-500 bg-orange-600 hover:bg-orange-500 text-white font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-xs px-4 py-1.5 rounded border border-amber-500 bg-amber-600 hover:bg-amber-500 text-white font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? 'Saving…' : 'Save'}
                     </button>

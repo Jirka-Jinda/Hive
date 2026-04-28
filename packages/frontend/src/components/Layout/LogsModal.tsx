@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { AppErrorLog, UserActionLog } from '../../api/client';
+import { useModal } from '../../hooks/useModal';
+import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
     onClose: () => void;
@@ -36,6 +38,7 @@ export default function LogsModal({ onClose }: Props) {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [expandedStack, setExpandedStack] = useState<number | null>(null);
+    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     const loadLogs = async () => {
         setLoading(true);
@@ -60,17 +63,17 @@ export default function LogsModal({ onClose }: Props) {
 
     const tabCls = (t: Tab) =>
         `px-4 py-2 text-sm font-medium transition-colors border-b-2 ${tab === t
-            ? 'border-orange-500 text-orange-400'
+            ? 'border-amber-500 text-amber-400'
             : 'border-transparent text-gray-400 hover:text-gray-200'
         }`;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-5xl mx-4 max-h-[88vh] flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
                         <span className="text-sm font-semibold text-gray-200">Application Logs</span>
@@ -78,16 +81,11 @@ export default function LogsModal({ onClose }: Props) {
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => { void loadLogs(); }}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:text-white hover:border-gray-600 font-medium transition-all"
+                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
                         >
                             Refresh
                         </button>
-                        <button
-                            onClick={onClose}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 font-medium transition-all"
-                        >
-                            Close
-                        </button>
+                        <XCloseButton onClick={onClose} />
                     </div>
                 </div>
 
@@ -140,7 +138,7 @@ export default function LogsModal({ onClose }: Props) {
                                                 {formatTime(row.created_at)}
                                             </td>
                                             <td className="py-2 pr-4">
-                                                <span className="inline-flex items-center rounded-full border border-orange-500/30 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-300 whitespace-nowrap">
+                                                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-300 whitespace-nowrap">
                                                     {ACTION_LABELS[row.action] ?? row.action}
                                                 </span>
                                             </td>
