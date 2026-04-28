@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import type { MdFile, ParamDef } from '../../api/client';
+import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
     onClose: () => void;
@@ -69,10 +70,16 @@ export default function PromptPanel({ onClose }: Props) {
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="w-[520px] max-h-[80vh] flex flex-col rounded-xl border border-gray-700 bg-gray-900 shadow-2xl">
+            <div className="w-[820px] max-h-[80vh] flex flex-col rounded-xl border border-gray-700 bg-gray-900 shadow-2xl">
                 {/* Header */}
-                <div className="flex items-center px-4 py-3 border-b border-gray-800">
-                    <h2 className="text-sm font-semibold text-gray-100">📝 Prompt Templates</h2>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                    <h2 className="text-sm font-semibold text-gray-100 flex items-center gap-2">
+                        <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Prompt Templates
+                    </h2>
+                    <XCloseButton onClick={onClose} />
                 </div>
 
                 <div className="flex flex-1 overflow-hidden min-h-0">
@@ -172,12 +179,6 @@ export default function PromptPanel({ onClose }: Props) {
                             : 'No active session'}
                     </p>
                     <div className="flex gap-2">
-                        <button
-                            onClick={onClose}
-                            className="px-3 py-1.5 text-xs rounded border border-gray-700 bg-gray-800 text-gray-300 hover:bg-gray-750 hover:text-white transition-colors"
-                        >
-                            Close
-                        </button>
                         <button
                             onClick={() => void handleRun()}
                             disabled={!selectedFile || !selectedSession || running}

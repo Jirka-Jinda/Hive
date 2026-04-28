@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import type { Agent, Credential } from '../../api/client';
-import { useModal } from '../../hooks/useModal';
 import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
@@ -21,7 +20,6 @@ export default function CredentialsModal({ onClose }: Props) {
     const [deletingCred, setDeletingCred] = useState(false);
 
     const currentAgent = agents.find((a: Agent) => a.id === agentType);
-    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     const handleCreate = async () => {
         if (!name.trim() || !agentType) {
@@ -63,13 +61,13 @@ export default function CredentialsModal({ onClose }: Props) {
     };
 
     return (
-        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-gray-900 border border-gray-700/60 rounded-xl w-full max-w-lg mx-4 shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+            <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg shadow-2xl overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
-                    <h2 className="text-sm font-semibold text-gray-200">Credential Profiles</h2>
+                    <h2 className="text-sm font-semibold text-gray-100">Credential Profiles</h2>
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => { setShowCreate(!showCreate); setErrorMsg(''); }}
+                            onClick={() => setShowCreate(!showCreate)}
                             className={`inline-flex items-center gap-0.5 text-xs px-2.5 py-1 rounded border transition-all font-medium ${showCreate
                                 ? 'bg-orange-600 border-orange-500 text-white'
                                 : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
@@ -96,7 +94,7 @@ export default function CredentialsModal({ onClose }: Props) {
                                 autoFocus
                             />
                             <select
-                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all"
                                 value={agentType}
                                 onChange={(e) => {
                                     setAgentType(e.target.value);
@@ -138,7 +136,7 @@ export default function CredentialsModal({ onClose }: Props) {
 
                     {credentials.length === 0 && !showCreate ? (
                         <p className="text-sm text-gray-500 italic text-center py-4">
-                            No credential profiles yet. Click + Add to add one.
+                            No credential profiles yet. Click + New to add one.
                         </p>
                     ) : (
                         <ul className="space-y-1">
@@ -156,13 +154,13 @@ export default function CredentialsModal({ onClose }: Props) {
                                             <button
                                                 onClick={() => void handleDelete(cred.id)}
                                                 disabled={deletingCred}
-                                                className="text-xs px-2.5 py-1.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
+                                                className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
                                             >
-                                                {deletingCred ? '…' : 'Yes'}
+                                                {deletingCred ? '\u2026' : 'Yes'}
                                             </button>
                                             <button
                                                 onClick={() => setConfirmDeleteCredId(null)}
-                                                className="text-xs px-2.5 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
+                                                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
                                             >
                                                 No
                                             </button>
@@ -170,7 +168,7 @@ export default function CredentialsModal({ onClose }: Props) {
                                     ) : (
                                         <button
                                             onClick={() => setConfirmDeleteCredId(cred.id)}
-                                            className="inline-flex items-center text-xs px-2 py-1.5 rounded border bg-gray-900 border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-800/50 hover:bg-red-950/30 transition-all font-medium"
+                                            className="inline-flex items-center text-xs px-2 py-1 rounded border bg-gray-900 border-gray-700 text-gray-500 hover:text-red-400 hover:border-red-800/50 hover:bg-red-950/30 transition-all font-medium"
                                         >
                                             Delete
                                         </button>
@@ -180,6 +178,8 @@ export default function CredentialsModal({ onClose }: Props) {
                         </ul>
                     )}
                 </div>
+
+
             </div>
         </div>
     );
