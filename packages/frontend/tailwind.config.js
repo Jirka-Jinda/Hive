@@ -5,6 +5,9 @@ export default {
     content: ['./index.html', './src/**/*.{ts,tsx}'],
     theme: {
         extend: {
+            colors: {
+                gray: { 750: '#2d3748' },
+            },
             fontFamily: {
                 mono: ['JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Fira Mono', 'ui-monospace', 'SF Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'monospace'],
                 sans: ['JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Fira Mono', 'ui-monospace', 'SF Mono', 'Consolas', 'Liberation Mono', 'Menlo', 'monospace'],

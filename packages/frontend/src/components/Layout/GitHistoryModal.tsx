@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { GitHistoryEntry, GitStatus, Repo, Session } from '../../api/client';
-import { useModal } from '../../hooks/useModal';
 import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
@@ -34,7 +33,6 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
     const [status, setStatus] = useState<GitStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     const sessionId = session?.id;
     const scopeLabel = session ? `Session worktree • ${session.name}` : `Repo root • ${repo.name}`;
@@ -61,7 +59,7 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
     }, [repo.id, sessionId]);
 
     return (
-        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-5xl mx-4 max-h-[88vh] flex flex-col overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <div>
@@ -72,7 +70,7 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
                                 <circle cx="17.5" cy="12" r="2.25" />
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 6.5h4a3 3 0 013 3v0M8.5 17.5h4a3 3 0 003-3v0" />
                             </svg>
-                            <span className="text-sm font-semibold text-gray-200">Git History</span>
+                            <h2 className="text-sm font-semibold text-gray-200">Git History</h2>
                             <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-orange-200">
                                 {getHeadBadge(status)}
                             </span>
@@ -83,9 +81,12 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => { void loadHistory(); }}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
+                            title="Refresh"
+                            className="inline-flex items-center justify-center w-6 h-6 rounded border bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-200 hover:bg-gray-750 hover:border-gray-600 transition-all"
                         >
-                            Refresh
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
                         </button>
                         <XCloseButton onClick={onClose} />
                     </div>

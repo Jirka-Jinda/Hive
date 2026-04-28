@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { api, type PipelineNodeDto, type PipelinePhase } from '../../api/client';
-import { useModal } from '../../hooks/useModal';
-import Toggle from '../ui/Toggle';
 import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
@@ -26,7 +24,6 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [toggling, setToggling] = useState<string | null>(null);
-    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     useEffect(() => {
         api.pipeline.list()
@@ -50,7 +47,7 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
     };
 
     return (
-        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-lg mx-4">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -58,7 +55,7 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
                         <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
                         </svg>
-                        <span className="text-sm font-semibold text-gray-200">Prompt Pipeline</span>
+                        <h2 className="text-sm font-semibold text-gray-200">Prompt Pipeline</h2>
                     </div>
                     <XCloseButton onClick={onClose} />
                 </div>
@@ -88,14 +85,20 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
                             className="flex items-start gap-3 rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-3"
                         >
                             {/* Toggle */}
-                            <div className="mt-0.5">
-                                <Toggle
-                                    checked={node.enabled}
-                                    onChange={() => void handleToggle(node)}
-                                    disabled={toggling === node.id}
-                                    title={node.enabled ? 'Disable node' : 'Enable node'}
+                            <button
+                                onClick={() => void handleToggle(node)}
+                                disabled={toggling === node.id}
+                                title={node.enabled ? 'Disable node' : 'Enable node'}
+                                className={`relative mt-0.5 flex-shrink-0 w-9 h-5 rounded-full border transition-all focus:outline-none ${node.enabled
+                                    ? 'bg-orange-600 border-orange-500'
+                                    : 'bg-gray-700 border-gray-600'
+                                    } disabled:opacity-50`}
+                            >
+                                <span
+                                    className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${node.enabled ? 'translate-x-4' : 'translate-x-0'
+                                        }`}
                                 />
-                            </div>
+                            </button>
 
                             {/* Info */}
                             <div className="flex-1 min-w-0">

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../api/client';
 import type { AppErrorLog, UserActionLog } from '../../api/client';
-import { useModal } from '../../hooks/useModal';
 import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
@@ -38,7 +37,6 @@ export default function LogsModal({ onClose }: Props) {
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [expandedStack, setExpandedStack] = useState<number | null>(null);
-    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     const loadLogs = async () => {
         setLoading(true);
@@ -68,7 +66,7 @@ export default function LogsModal({ onClose }: Props) {
         }`;
 
     return (
-        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-5xl mx-4 max-h-[88vh] flex flex-col overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
@@ -76,14 +74,17 @@ export default function LogsModal({ onClose }: Props) {
                         <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                         </svg>
-                        <span className="text-sm font-semibold text-gray-200">Application Logs</span>
+                        <h2 className="text-sm font-semibold text-gray-200">Application Logs</h2>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => { void loadLogs(); }}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
+                            title="Refresh"
+                            className="inline-flex items-center justify-center w-6 h-6 rounded border bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-200 hover:bg-gray-750 hover:border-gray-600 transition-all"
                         >
-                            Refresh
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
                         </button>
                         <XCloseButton onClick={onClose} />
                     </div>

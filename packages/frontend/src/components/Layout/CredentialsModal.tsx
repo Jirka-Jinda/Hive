@@ -63,8 +63,8 @@ export default function CredentialsModal({ onClose }: Props) {
     return (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
             <div className="bg-gray-900 border border-gray-700 rounded-lg w-full max-w-lg shadow-2xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
-                    <h2 className="text-sm font-semibold text-gray-100">Credential Profiles</h2>
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+                    <h2 className="text-sm font-semibold text-gray-200">Credential Profiles</h2>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setShowCreate(!showCreate)}

@@ -198,7 +198,7 @@ export default function AppShell() {
                                 onClick={() => setActiveView('terminal')}
                                 title="Terminal view (Ctrl+`)"
                                 className={`${iconBtnBase} ${activeView === 'terminal'
-                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
+                                    ? 'bg-orange-600/10 border-orange-500/40 text-orange-200 shadow-[0_0_12px_rgba(234,88,12,0.25)]'
                                     : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                     }`}
                             >
@@ -210,7 +210,7 @@ export default function AppShell() {
                                 onClick={() => { if (selectedMdFile) setActiveView('editor'); }}
                                 title={selectedMdFile ? 'Editor view (Ctrl+`)' : 'Open an MD file to use editor view'}
                                 className={`${iconBtnBase} ${activeView === 'editor'
-                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
+                                    ? 'bg-orange-600/10 border-orange-500/40 text-orange-200 shadow-[0_0_12px_rgba(234,88,12,0.25)]'
                                     : selectedMdFile
                                         ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                         : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
@@ -353,7 +353,7 @@ export default function AppShell() {
                                 onClick={() => void toggleFullscreen()}
                                 title={isFullscreen ? 'Exit fullscreen (F11)' : 'Enter fullscreen (F11)'}
                                 className={`${iconBtnBase} ${isFullscreen
-                                    ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
+                                    ? 'bg-orange-600/10 border-orange-500/40 text-orange-200 shadow-[0_0_12px_rgba(234,88,12,0.25)]'
                                     : 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
                                     }`}
                             >

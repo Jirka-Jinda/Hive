@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
-import { useModal } from '../../hooks/useModal';
 import XCloseButton from '../ui/XCloseButton';
 
 interface ToolStatus {
@@ -21,7 +20,6 @@ export default function InstallToolsModal({ onClose }: Props) {
     const [done, setDone] = useState(false);
     const [log, setLog] = useState<{ text: string; type: 'log' | 'error' }[]>([]);
     const logRef = useRef<HTMLDivElement>(null);
-    const { overlayRef, handleOverlayClick } = useModal(onClose);
 
     useEffect(() => {
         api.tools.status()
@@ -87,11 +85,11 @@ export default function InstallToolsModal({ onClose }: Props) {
     const missingCount = tools.filter((t) => !t.installed).length;
 
     return (
-        <div ref={overlayRef} onClick={handleOverlayClick} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-gray-900 border border-gray-700/60 rounded-xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh]">
                 {/* Header */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
-                    <span className="text-sm font-semibold text-gray-200">CLI Agent Tools</span>
+                    <h2 className="text-sm font-semibold text-gray-200">CLI Agent Tools</h2>
                     <XCloseButton onClick={onClose} />
                 </div>
 
@@ -142,23 +140,15 @@ export default function InstallToolsModal({ onClose }: Props) {
                                 ? `${missingCount} tool${missingCount !== 1 ? 's' : ''} missing`
                                 : ''}
                     </p>
-                    <div className="flex gap-2">
+                    {missingCount > 0 && !done && (
                         <button
-                            onClick={onClose}
-                            className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 font-medium transition-all"
+                            onClick={handleInstall}
+                            disabled={installing}
+                            className="text-xs px-4 py-1.5 rounded border border-orange-500 bg-orange-600/80 hover:bg-orange-500 text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            Close
+                            {installing ? 'Installing…' : 'Install Missing Tools'}
                         </button>
-                        {missingCount > 0 && !done && (
-                            <button
-                                onClick={handleInstall}
-                                disabled={installing}
-                                className="text-xs px-4 py-1.5 rounded border border-orange-500 bg-orange-600/80 hover:bg-orange-500 text-white font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {installing ? 'Installing…' : 'Install Missing Tools'}
-                            </button>
-                        )}
-                    </div>
+                    )}
                 </div>
             </div>
         </div>
