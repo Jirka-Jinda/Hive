@@ -208,6 +208,20 @@ describe('spawnAgent – Windows cmd wrapping', () => {
     expect(spawnFile).not.toBe('cmd.exe');
     expect(spawnFile).toBe('/usr/local/bin/codex');
   });
+
+  it('passes the provided working directory through to node-pty', () => {
+    setPlatform('linux');
+    mockExecSync.mockReturnValue('/usr/local/bin/codex\n');
+    mockExistsSync.mockReturnValue(true);
+
+    spawnAgent(freshId(), AGENT_ADAPTERS['codex'], '/repo/worktrees/session-1');
+
+    expect(mockPtySpawn).toHaveBeenCalledWith(
+      '/usr/local/bin/codex',
+      [],
+      expect.objectContaining({ cwd: '/repo/worktrees/session-1' })
+    );
+  });
 });
 
 // ── Adapter env-var contracts ───────────────────────────────────────────────

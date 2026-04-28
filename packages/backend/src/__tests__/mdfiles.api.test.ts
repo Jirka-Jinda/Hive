@@ -9,6 +9,8 @@ describe('MD Files API', () => {
   let fileId = 0;
   let repoId = 0;
   let repoPath = '';
+  let otherRepoId = 0;
+  let otherRepoPath = '';
 
   beforeAll(async () => {
     repoPath = join(testPaths.root, 'mdfiles-repo');
@@ -19,6 +21,15 @@ describe('MD Files API', () => {
       body: { path: repoPath, name: 'md-repo' },
     });
     repoId = (await res.json()).id;
+
+    otherRepoPath = join(testPaths.root, 'mdfiles-other-repo');
+    mkdirSync(otherRepoPath, { recursive: true });
+
+    const otherRes = await req(getApp(), '/api/repos', {
+      method: 'POST',
+      body: { path: otherRepoPath, name: 'md-other-repo' },
+    });
+    otherRepoId = (await otherRes.json()).id;
   });
 
   it('GET /api/mdfiles — returns array', async () => {
@@ -87,6 +98,68 @@ describe('MD Files API', () => {
   it('GET /api/mdfiles/:id — reflects updated content after PUT', async () => {
     const res = await req(getApp(), `/api/mdfiles/${fileId}`);
     expect((await res.json()).content).toBe('# Updated\n\nNew content.');
+  });
+
+  it('PUT /api/mdfiles/:id — renames the file and auto-appends .md', async () => {
+    const res = await req(getApp(), `/api/mdfiles/${fileId}`, {
+      method: 'PUT',
+      body: { filename: 'renamed-mdfiles-api' },
+    });
+    expect(res.status).toBe(200);
+
+    const file = await res.json();
+    expect(file.id).toBe(fileId);
+    expect(file.path).toMatch(/renamed-mdfiles-api\.md$/);
+
+    const readRes = await req(getApp(), `/api/mdfiles/${fileId}`);
+    const updated = await readRes.json();
+    expect(updated.path).toMatch(/renamed-mdfiles-api\.md$/);
+  });
+
+  it('PUT /api/mdfiles/:id — updates scope and type in place', async () => {
+    const res = await req(getApp(), `/api/mdfiles/${fileId}`, {
+      method: 'PUT',
+      body: { scope: 'repo', repoPath, type: 'tool' },
+    });
+    expect(res.status).toBe(200);
+
+    const file = await res.json();
+    expect(file.id).toBe(fileId);
+    expect(file.scope).toBe('repo');
+    expect(file.repo_id).toBe(repoId);
+    expect(file.type).toBe('tool');
+
+    const repoFilesRes = await req(getApp(), `/api/mdfiles?scope=repo&repoId=${repoId}`);
+    const repoFiles = await repoFilesRes.json();
+    expect(repoFiles.some((item: { id: number }) => item.id === fileId)).toBe(true);
+
+    const centralFilesRes = await req(getApp(), '/api/mdfiles?scope=central');
+    const centralFiles = await centralFilesRes.json();
+    expect(centralFiles.some((item: { id: number }) => item.id === fileId)).toBe(false);
+  });
+
+  it('PUT /api/mdfiles/:id — removes repo refs from other repos when scope changes to repo', async () => {
+    const createRes = await req(getApp(), '/api/mdfiles', {
+      method: 'POST',
+      body: { scope: 'central', filename: 'cross-repo-ref.md', content: '# Shared', type: 'instruction' },
+    });
+    const crossRepoFileId = (await createRes.json()).id as number;
+
+    const linkRes = await req(getApp(), `/api/repos/${otherRepoId}/md-refs`, {
+      method: 'PUT',
+      body: { mdFileIds: [crossRepoFileId] },
+    });
+    expect(linkRes.status).toBe(200);
+
+    const moveRes = await req(getApp(), `/api/mdfiles/${crossRepoFileId}`, {
+      method: 'PUT',
+      body: { scope: 'repo', repoPath, type: 'instruction' },
+    });
+    expect(moveRes.status).toBe(200);
+
+    const otherRepoRefsRes = await req(getApp(), `/api/repos/${otherRepoId}/md-refs`);
+    const otherRepoRefs = await otherRepoRefsRes.json();
+    expect(otherRepoRefs.some((item: { id: number }) => item.id === crossRepoFileId)).toBe(false);
   });
 
   it('POST /api/mdfiles — auto-appends .md extension when missing', async () => {

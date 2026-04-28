@@ -66,6 +66,9 @@ function makeTestApp() {
   const credentialStore = new CredentialStore(db);
   const mdRefService = new MdRefService(db);
   const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
+  void workspace.reconcileGitWorktrees().catch(() => {
+    // Test apps may not have any managed worktrees to reconcile.
+  });
   const usageService = new UsageService(db);
   const pipelineRegistry = new PipelineRegistry(settingsService);
   const tokenCounter = new TokenCounterService();

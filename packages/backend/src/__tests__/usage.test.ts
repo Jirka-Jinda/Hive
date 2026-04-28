@@ -90,7 +90,7 @@ describe('Usage analytics', () => {
     const credential = credentialStore.create('usage-credential', 'claude', { envVars: { ANTHROPIC_API_KEY: 'secret' } });
     credentialId = credential.id;
 
-    const session = workspace.createSession({
+    const session = await workspace.createSession({
       repoId,
       name: 'usage-session',
       agentType: 'claude',

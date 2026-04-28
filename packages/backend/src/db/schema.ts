@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
   name          TEXT    NOT NULL,
   status        TEXT    NOT NULL DEFAULT 'stopped' CHECK(status IN ('running','stopped')),
+  state         TEXT    NOT NULL DEFAULT 'stopped' CHECK(state IN ('working','idle','stopped')),
+  branch_mode   TEXT,
+  initial_branch_name TEXT,
+  worktree_path TEXT,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -79,9 +83,16 @@ CREATE TABLE IF NOT EXISTS md_files (
   type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','prompt','other')),
   content    TEXT    NOT NULL DEFAULT '',
   created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(scope, path)
+  updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_central_path
+  ON md_files(path)
+  WHERE scope = 'central';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_repo_path
+  ON md_files(repo_id, path)
+  WHERE scope = 'repo' AND repo_id IS NOT NULL;
 
 -- Repo-level central MD file references (default context for all sessions in a repo)
 CREATE TABLE IF NOT EXISTS repo_md_refs (

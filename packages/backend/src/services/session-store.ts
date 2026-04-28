@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 
+export type SessionBranchMode = 'new' | 'existing';
+
 export interface Session {
   id: number;
   repo_id: number;
@@ -8,12 +10,27 @@ export interface Session {
   name: string;
   status: 'running' | 'stopped';
   state: 'working' | 'idle' | 'stopped';
+  branch_mode: SessionBranchMode | null;
+  initial_branch_name: string | null;
+  worktree_path: string | null;
   created_at: string;
   updated_at: string;
 }
 
+export interface SessionWithGitStatus extends Session {
+  current_branch: string | null;
+  head_ref: string | null;
+  is_detached: boolean;
+}
+
 export class SessionStore {
   constructor(private db: Database.Database) {}
+
+  listAll(): Session[] {
+    return this.db
+      .prepare('SELECT * FROM sessions ORDER BY created_at DESC')
+      .all() as Session[];
+  }
 
   list(repoId: number): Session[] {
     return this.db
@@ -27,10 +44,28 @@ export class SessionStore {
     return row;
   }
 
-  create(repoId: number, agentType: string, name: string, credentialId?: number): Session {
+  create(input: {
+    repoId: number;
+    agentType: string;
+    name: string;
+    credentialId?: number;
+    branchMode?: SessionBranchMode | null;
+    initialBranchName?: string | null;
+    worktreePath?: string | null;
+  }): Session {
     const result = this.db
-      .prepare('INSERT INTO sessions (repo_id, agent_type, name, credential_id) VALUES (?, ?, ?, ?)')
-      .run(repoId, agentType, name, credentialId ?? null);
+      .prepare(
+        'INSERT INTO sessions (repo_id, agent_type, name, credential_id, branch_mode, initial_branch_name, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      )
+      .run(
+        input.repoId,
+        input.agentType,
+        input.name,
+        input.credentialId ?? null,
+        input.branchMode ?? null,
+        input.initialBranchName ?? null,
+        input.worktreePath ?? null,
+      );
     return this.get(result.lastInsertRowid as number);
   }
 
@@ -56,6 +91,29 @@ export class SessionStore {
     this.db
       .prepare("UPDATE sessions SET state = ?, updated_at = datetime('now') WHERE id = ?")
       .run(state, id);
+  }
+
+  updateGitMetadata(
+    id: number,
+    changes: {
+      branchMode?: SessionBranchMode | null;
+      initialBranchName?: string | null;
+      worktreePath?: string | null;
+    },
+  ): Session {
+    const current = this.get(id);
+    this.db
+      .prepare(
+        "UPDATE sessions SET branch_mode = ?, initial_branch_name = ?, worktree_path = ?, updated_at = datetime('now') WHERE id = ?"
+      )
+      .run(
+        changes.branchMode !== undefined ? changes.branchMode : current.branch_mode,
+        changes.initialBranchName !== undefined ? changes.initialBranchName : current.initial_branch_name,
+        changes.worktreePath !== undefined ? changes.worktreePath : current.worktree_path,
+        id,
+      );
+
+    return this.get(id);
   }
 
   appendLog(sessionId: number, output: Buffer): void {

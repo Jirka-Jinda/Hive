@@ -66,7 +66,8 @@ export function setupWebSocketServer(
         // Persist credential to gh's OS credential store so Copilot CLI can
         // authenticate via `gh auth token` fallback on all future sessions.
         adapter.setupAuth?.(credential ?? {});
-        entry = spawnAgent(sessionId, adapter, repo.path, credential, cols, rows);
+        const workingDirectory = repoManager.resolveWorkingDirectory(repo, session.worktree_path);
+        entry = spawnAgent(sessionId, adapter, workingDirectory, credential, cols, rows);
       } catch (spawnError: unknown) {
         sessionStore.setState(sessionId, 'stopped');
         notificationBus.emitSessionState({ sessionId, state: 'stopped', sessionName: session.name });

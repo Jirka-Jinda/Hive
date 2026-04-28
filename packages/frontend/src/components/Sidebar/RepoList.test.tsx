@@ -38,6 +38,7 @@ describe('RepoList', () => {
           source: 'local',
           git_url: null,
           created_at: '2026-04-27T00:00:00Z',
+          session_count: 2,
           is_git_repo: true,
         },
       ],
@@ -48,6 +49,7 @@ describe('RepoList', () => {
         source: 'local',
         git_url: null,
         created_at: '2026-04-27T00:00:00Z',
+        session_count: 2,
         is_git_repo: true,
       },
       mdFiles: [
@@ -84,6 +86,7 @@ describe('RepoList', () => {
       source: 'local',
       git_url: null,
       created_at: '2026-04-27T00:00:00Z',
+      session_count: 2,
       is_git_repo: true,
     });
   });
@@ -104,5 +107,11 @@ describe('RepoList', () => {
     expect(apiMock.repos.mdRefs.set).toHaveBeenCalledWith(1, [101]);
     expect(useAppStore.getState().selectedRepo?.name).toBe('Renamed Repo');
     expect(useAppStore.getState().repos[0]?.name).toBe('Renamed Repo');
+  });
+
+  it('shows a subtle session count badge next to repos with sessions', () => {
+    render(<RepoList />);
+
+    expect(screen.getByTitle('2 sessions')).toHaveTextContent('2');
   });
 });

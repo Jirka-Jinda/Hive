@@ -6,7 +6,7 @@ import { resolveCommand } from './agents';
 export interface ProcessEntry {
   pty: pty.IPty;
   sessionId: number;
-  repoPath: string;
+  workingDirectory: string;
   events: EventEmitter;
 }
 
@@ -15,7 +15,7 @@ const processes = new Map<number, ProcessEntry>();
 export function spawnAgent(
   sessionId: number,
   adapter: AgentAdapter,
-  repoPath: string,
+  workingDirectory: string,
   credential?: Record<string, string>,
   cols = 120,
   rows = 30
@@ -39,7 +39,7 @@ export function spawnAgent(
     name: 'xterm-color',
     cols,
     rows,
-    cwd: repoPath,
+    cwd: workingDirectory,
     env: {
       ...process.env,
       ...adapter.envVars(credential),
@@ -48,7 +48,7 @@ export function spawnAgent(
   });
 
   const events = new EventEmitter();
-  const entry: ProcessEntry = { pty: proc, sessionId, repoPath, events };
+  const entry: ProcessEntry = { pty: proc, sessionId, workingDirectory, events };
   processes.set(sessionId, entry);
 
   proc.onData((data: string) => events.emit('data', Buffer.from(data)));

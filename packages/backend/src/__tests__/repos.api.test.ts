@@ -9,6 +9,15 @@ describe('Repos API', () => {
   let repoId = 0;
   const repoPath = join(testPaths.root, 'repos-api-local');
 
+  const seedAgentMarkdown = (targetPath: string, label: string) => {
+    writeFileSync(join(targetPath, 'AGENTS.md'), `# ${label} Agents`, 'utf8');
+    mkdirSync(join(targetPath, '.github'), { recursive: true });
+    writeFileSync(join(targetPath, '.github', 'copilot-instructions.md'), `# ${label} Copilot`, 'utf8');
+    mkdirSync(join(targetPath, '.agents', 'skills', 'review'), { recursive: true });
+    writeFileSync(join(targetPath, '.agents', 'skills', 'review', 'SKILL.md'), `# ${label} Skill`, 'utf8');
+    writeFileSync(join(targetPath, 'README.md'), '# Not imported', 'utf8');
+  };
+
   it('GET /api/repos — returns array', async () => {
     const res = await req(getApp(), '/api/repos');
     expect(res.status).toBe(200);
@@ -35,6 +44,7 @@ describe('Repos API', () => {
 
   it('POST /api/repos — 201 for valid local path', async () => {
     mkdirSync(repoPath, { recursive: true });
+    seedAgentMarkdown(repoPath, 'Primary');
     const res = await req(getApp(), '/api/repos', {
       method: 'POST',
       body: { path: repoPath, name: 'test-repo' },
@@ -45,8 +55,43 @@ describe('Repos API', () => {
     expect(repo.name).toBe('test-repo');
     expect(repo.source).toBe('local');
     expect(repo.git_url).toBeNull();
+    expect(repo.session_count).toBe(0);
     expect(repo.is_git_repo).toBe(false);
     repoId = repo.id;
+  });
+
+  it('POST /api/repos — discovers repo-scoped agent markdown files', async () => {
+    const res = await req(getApp(), `/api/mdfiles?scope=repo&repoId=${repoId}`);
+    expect(res.status).toBe(200);
+    const files = await res.json() as { path: string; type: string }[];
+
+    expect(files.map((file) => file.path)).toEqual([
+      '.agents/skills/review/SKILL.md',
+      '.github/copilot-instructions.md',
+      'AGENTS.md',
+    ]);
+    expect(files.find((file) => file.path === '.agents/skills/review/SKILL.md')?.type).toBe('skill');
+    expect(files.find((file) => file.path === '.github/copilot-instructions.md')?.type).toBe('instruction');
+    expect(files.some((file) => file.path === 'README.md')).toBe(false);
+  });
+
+  it('POST /api/repos — allows the same discovered path in another repo', async () => {
+    const duplicateRepoPath = join(testPaths.root, 'repos-api-duplicate-agent-paths');
+    mkdirSync(duplicateRepoPath, { recursive: true });
+    seedAgentMarkdown(duplicateRepoPath, 'Duplicate');
+
+    const createRes = await req(getApp(), '/api/repos', {
+      method: 'POST',
+      body: { path: duplicateRepoPath, name: 'duplicate-agent-repo' },
+    });
+    expect(createRes.status).toBe(201);
+
+    const duplicateRepoId = (await createRes.json()).id as number;
+    const filesRes = await req(getApp(), `/api/mdfiles?scope=repo&repoId=${duplicateRepoId}`);
+    expect(filesRes.status).toBe(200);
+
+    const files = await filesRes.json() as { path: string }[];
+    expect(files.some((file) => file.path === 'AGENTS.md')).toBe(true);
   });
 
   it('GET /api/repos/:id — returns the created repo', async () => {
@@ -55,6 +100,7 @@ describe('Repos API', () => {
     const repo = await res.json();
     expect(repo.id).toBe(repoId);
     expect(repo.name).toBe('test-repo');
+    expect(repo.session_count).toBe(0);
   });
 
   it('GET /api/repos/:id — 404 for unknown repo', async () => {
@@ -108,6 +154,34 @@ describe('Repos API', () => {
     expect(repos.some((repo: { name: string }) => repo.name === 'discovered-repo')).toBe(true);
   });
 
+  it('DELETE /api/repos/:id — removes discovered repo-scoped md files', async () => {
+    const cleanupRepoPath = join(testPaths.root, 'repos-api-md-cleanup');
+    mkdirSync(cleanupRepoPath, { recursive: true });
+    seedAgentMarkdown(cleanupRepoPath, 'Cleanup');
+
+    const createRes = await req(getApp(), '/api/repos', {
+      method: 'POST',
+      body: { path: cleanupRepoPath, name: 'cleanup-repo' },
+    });
+    expect(createRes.status).toBe(201);
+    const cleanupRepoId = (await createRes.json()).id as number;
+
+    const discoveredRes = await req(getApp(), `/api/mdfiles?scope=repo&repoId=${cleanupRepoId}`);
+    const discoveredFiles = await discoveredRes.json() as { id: number }[];
+    expect(discoveredFiles.length).toBe(3);
+
+    const deleteRes = await req(getApp(), `/api/repos/${cleanupRepoId}`, { method: 'DELETE' });
+    expect(deleteRes.status).toBe(200);
+
+    const repoFilesRes = await req(getApp(), `/api/mdfiles?scope=repo&repoId=${cleanupRepoId}`);
+    expect(repoFilesRes.status).toBe(200);
+    expect(await repoFilesRes.json()).toEqual([]);
+
+    const allFilesRes = await req(getApp(), '/api/mdfiles');
+    const allFiles = await allFilesRes.json() as { id: number }[];
+    expect(discoveredFiles.every((file) => allFiles.every((remaining) => remaining.id !== file.id))).toBe(true);
+  });
+
   describe('Sessions', () => {
     let sessionId = 0;
     let repoMdFileId = 0;
@@ -148,6 +222,12 @@ describe('Repos API', () => {
       expect(session.status).toBe('stopped');
       expect(session.repo_id).toBe(repoId);
       sessionId = session.id;
+    });
+
+    it('GET /api/repos/:id — reflects the updated session count', async () => {
+      const res = await req(getApp(), `/api/repos/${repoId}`);
+      expect(res.status).toBe(200);
+      expect((await res.json()).session_count).toBe(1);
     });
 
     it('POST /api/repos/:id/sessions — 400 when credential belongs to a different agent', async () => {

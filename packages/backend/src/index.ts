@@ -43,10 +43,12 @@ import { usageRouter } from './routes/usage';
 const db = openDb(join(Config.DATA_DIR, 'app.db'));
 migrate(db);
 const settingsService = new SettingsService();
+const notificationBus = new NotificationBus();
 const mdMgr = new MdFileManager(db);
-const centralMdSync = new CentralMdSyncService(mdMgr);
+const centralMdSync = new CentralMdSyncService(mdMgr, notificationBus);
 mdMgr.setSyncService(centralMdSync);
 centralMdSync.fullSync();
+centralMdSync.startWatching();
 
 // ── Services (single instances shared across routes, WS, and pipelines) ───
 const sessionStore = new SessionStore(db);
@@ -56,9 +58,11 @@ const mdRefService = new MdRefService(db);
 const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
 const tokenCounter = new TokenCounterService();
 const usageService = new UsageService(db);
+void workspace.reconcileGitWorktrees().catch((error) => {
+  console.error('[WARN] Failed to reconcile managed git worktrees on startup', error);
+});
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
-const notificationBus = new NotificationBus();
 const pipelineRegistry = new PipelineRegistry(settingsService);
 pipelineRegistry.register(createMdContextNode(mdRefService));
 pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));

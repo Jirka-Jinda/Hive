@@ -5,31 +5,49 @@ import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 
 export default function MdEditor() {
-    const { selectedMdFile, setSelectedMdFile, mdFiles, setMdFiles } = useAppStore();
+    const { selectedMdFile, setSelectedMdFile, setMdFiles, selectedRepo } = useAppStore();
     const [content, setContent] = useState('');
+    const [draftType, setDraftType] = useState<'skill' | 'tool' | 'instruction' | 'prompt' | 'other'>('other');
+    const [draftScope, setDraftScope] = useState<'central' | 'repo'>('central');
     const [saving, setSaving] = useState(false);
     const [showPreview, setShowPreview] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
 
     const save = useCallback(async () => {
         if (!selectedMdFile) return;
+        const repoPath = draftScope === 'repo' ? selectedRepo?.path : undefined;
+        if (draftScope === 'repo' && !repoPath) {
+            setErrorMsg('Select a repository before moving this file to repo scope.');
+            return;
+        }
+
         setSaving(true);
         try {
             setErrorMsg('');
-            await api.mdfiles.update(selectedMdFile.id, content);
-            const updated = { ...selectedMdFile, content };
-            setSelectedMdFile(updated);
-            setMdFiles(mdFiles.map((f) => (f.id === selectedMdFile.id ? updated : f)));
+            const saved = await api.mdfiles.update(selectedMdFile.id, {
+                content,
+                scope: draftScope,
+                repoPath,
+                type: draftType,
+            });
+            const updated = { ...selectedMdFile, ...saved, content };
+            const { selectedMdFile: currentSelectedMdFile, mdFiles: currentMdFiles } = useAppStore.getState();
+
+            if (currentSelectedMdFile?.id === selectedMdFile.id) {
+                setSelectedMdFile(updated);
+            }
+
+            setMdFiles(currentMdFiles.map((f) => (f.id === selectedMdFile.id ? { ...f, ...saved } : f)));
         } catch (e: unknown) {
             setErrorMsg(e instanceof Error ? e.message : 'Save failed');
         } finally {
             setSaving(false);
         }
-    }, [selectedMdFile, content, mdFiles, setSelectedMdFile, setMdFiles]);
+    }, [selectedMdFile, content, draftScope, draftType, selectedRepo?.path, setSelectedMdFile, setMdFiles]);
 
-    // Keep a stable ref so the Monaco keybinding and auto-save always call the latest save
+    // Keep a stable ref so the Monaco keybinding and auto-save always call the latest save.
+    // The ref is updated after the file-switch effect so switching files saves the outgoing draft.
     const saveRef = useRef(save);
-    useEffect(() => { saveRef.current = save; }, [save]);
 
     const prevFileId = useRef<number | undefined>(undefined);
 
@@ -41,7 +59,14 @@ export default function MdEditor() {
             void saveRef.current();
         }
         setContent(selectedMdFile?.content ?? '');
+        setDraftType(selectedMdFile?.type ?? 'other');
+        setDraftScope(selectedMdFile?.scope ?? 'central');
+        setErrorMsg('');
     }, [selectedMdFile?.id]);
+
+    useEffect(() => {
+        saveRef.current = save;
+    }, [save]);
 
     if (!selectedMdFile) return null;
 
@@ -50,8 +75,10 @@ export default function MdEditor() {
         skill: 'bg-purple-900 text-purple-300',
         tool: 'bg-blue-900 text-blue-300',
         instruction: 'bg-green-900 text-green-300',
+        prompt: 'bg-orange-900 text-orange-300',
         other: 'bg-gray-700 text-gray-400',
     };
+    const canSaveToRepo = draftScope !== 'repo' || Boolean(selectedRepo?.path);
 
     return (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -60,16 +87,43 @@ export default function MdEditor() {
                 <div className="flex items-center gap-2 min-w-0">
                     <span className="text-sm font-medium text-gray-200 truncate">{filename}</span>
                     <span
-                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${typeBadgeColors[selectedMdFile.type] ?? typeBadgeColors.other
+                        className={`text-xs px-1.5 py-0.5 rounded font-medium ${typeBadgeColors[draftType] ?? typeBadgeColors.other
                             }`}
                     >
-                        {selectedMdFile.type}
+                        {draftType}
                     </span>
                     <span className="text-xs text-gray-600">
-                        {selectedMdFile.scope === 'central' ? 'central' : 'repo'}
+                        {draftScope === 'central' ? 'central' : `repo${selectedRepo ? `: ${selectedRepo.name}` : ''}`}
                     </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    <label className="flex items-center gap-1 text-xs text-gray-400">
+                        <span className="sr-only">MD file type</span>
+                        <select
+                            aria-label="MD file type"
+                            value={draftType}
+                            onChange={(event) => setDraftType(event.target.value as typeof draftType)}
+                            className="bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-orange-500"
+                        >
+                            <option value="skill">Skill</option>
+                            <option value="tool">Tool</option>
+                            <option value="instruction">Instruction</option>
+                            <option value="prompt">Prompt</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </label>
+                    <label className="flex items-center gap-1 text-xs text-gray-400">
+                        <span className="sr-only">MD file scope</span>
+                        <select
+                            aria-label="MD file scope"
+                            value={draftScope}
+                            onChange={(event) => setDraftScope(event.target.value as typeof draftScope)}
+                            className="bg-gray-800 border border-gray-700 text-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:border-orange-500"
+                        >
+                            <option value="central">Central</option>
+                            <option value="repo" disabled={!selectedRepo}>Repo</option>
+                        </select>
+                    </label>
                     {errorMsg && <span className="text-xs text-red-400">{errorMsg}</span>}
                     <button
                         onClick={() => setShowPreview(!showPreview)}
@@ -82,7 +136,7 @@ export default function MdEditor() {
                     </button>
                     <button
                         onClick={save}
-                        disabled={saving}
+                        disabled={saving || !canSaveToRepo}
                         className="text-xs px-3 py-1 bg-orange-600 hover:bg-orange-500 text-white rounded disabled:opacity-50 transition-colors"
                     >
                         {saving ? 'Saving…' : 'Save'}

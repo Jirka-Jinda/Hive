@@ -5,10 +5,19 @@ import { SCHEMA } from './schema';
 export function migrate(db: Database.Database): void {
   db.exec(SCHEMA);
 
-  // Add state column to sessions if it doesn't exist yet (existing DBs)
+  // Add missing session columns for existing DBs.
   const sessionCols = db.pragma('table_info(sessions)') as { name: string }[];
   if (!sessionCols.some((c) => c.name === 'state')) {
     db.exec("ALTER TABLE sessions ADD COLUMN state TEXT NOT NULL DEFAULT 'stopped'");
+  }
+  if (!sessionCols.some((c) => c.name === 'branch_mode')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN branch_mode TEXT');
+  }
+  if (!sessionCols.some((c) => c.name === 'initial_branch_name')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN initial_branch_name TEXT');
+  }
+  if (!sessionCols.some((c) => c.name === 'worktree_path')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN worktree_path TEXT');
   }
 
   // Add content column if it doesn't exist yet (existing DBs)
@@ -27,16 +36,17 @@ export function migrate(db: Database.Database): void {
     }
   }
 
-  // Migrate type CHECK constraint to include 'prompt' (SQLite requires table recreation)
-  // We use a pragmatic approach: insert a test row to detect the old constraint,
-  // then recreate the table if needed.
-  try {
-    db.exec("INSERT INTO md_files (scope,path,type,content) VALUES ('central','__probe__','prompt','') ON CONFLICT(scope,path) DO UPDATE SET content=content");
-    db.exec("DELETE FROM md_files WHERE path='__probe__' AND scope='central'");
-  } catch {
-    // Old constraint — recreate the table to expand the CHECK
+  const mdFilesTable = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='md_files'").get() as
+    | { sql: string | null }
+    | undefined;
+  const tableSql = mdFilesTable?.sql ?? '';
+  const needsMdFilesRebuild = /UNIQUE\s*\(\s*scope\s*,\s*path\s*\)/i.test(tableSql) || !tableSql.includes("'prompt'");
+
+  if (needsMdFilesRebuild) {
     db.exec(`
       PRAGMA foreign_keys = OFF;
+      DROP INDEX IF EXISTS idx_md_files_central_path;
+      DROP INDEX IF EXISTS idx_md_files_repo_path;
       CREATE TABLE IF NOT EXISTS md_files_new (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         scope      TEXT    NOT NULL CHECK(scope IN ('central','repo')),
@@ -45,12 +55,18 @@ export function migrate(db: Database.Database): void {
         type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','prompt','other')),
         content    TEXT    NOT NULL DEFAULT '',
         created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(scope, path)
+        updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
       );
-      INSERT INTO md_files_new SELECT * FROM md_files;
+      INSERT INTO md_files_new (id, scope, repo_id, path, type, content, created_at, updated_at)
+      SELECT id, scope, repo_id, path, type, content, created_at, updated_at FROM md_files;
       DROP TABLE md_files;
       ALTER TABLE md_files_new RENAME TO md_files;
+      CREATE UNIQUE INDEX idx_md_files_central_path
+        ON md_files(path)
+        WHERE scope = 'central';
+      CREATE UNIQUE INDEX idx_md_files_repo_path
+        ON md_files(repo_id, path)
+        WHERE scope = 'repo' AND repo_id IS NOT NULL;
       PRAGMA foreign_keys = ON;
     `);
   }

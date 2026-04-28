@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
-import type { MdFileManager } from '../services/mdfile-manager';
+import type { MdFile, MdFileManager } from '../services/mdfile-manager';
 import { parseFrontmatter, renderTemplate } from '../utils/template';
 import { jsonRoute, parseIdParam } from './route-utils';
+import { getErrorMessage } from '../utils/errors';
 
 export function mdfilesRouter(mdMgr: MdFileManager): Hono {
   const app = new Hono();
@@ -19,7 +20,7 @@ export function mdfilesRouter(mdMgr: MdFileManager): Hono {
       repoPath?: string;
       filename: string;
       content: string;
-      type?: 'skill' | 'tool' | 'instruction' | 'other';
+      type?: MdFile['type'];
     }>();
 
     return jsonRoute(c, () => mdMgr.create(body.scope, body.repoPath ?? null, body.filename, body.content, body.type), {
@@ -34,9 +35,20 @@ export function mdfilesRouter(mdMgr: MdFileManager): Hono {
   }, { errorStatus: 404 }));
 
   app.put('/:id', async (c) => {
-    const body = await c.req.json<{ content: string }>();
-
-    return jsonRoute(c, () => mdMgr.write(parseIdParam(c, 'id'), body.content), { errorStatus: 404 });
+    try {
+      const id = parseIdParam(c, 'id');
+      const body = await c.req.json<{
+        content?: string;
+        scope?: MdFile['scope'];
+        repoPath?: string;
+        filename?: string;
+        type?: MdFile['type'];
+      }>();
+      return c.json(mdMgr.update(id, body));
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
+      return c.json({ error: message }, /not found/i.test(message) ? 404 : 400);
+    }
   });
 
   app.delete('/:id', (c) => jsonRoute(c, () => {

@@ -7,8 +7,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import chokidar, { type FSWatcher } from 'chokidar';
 import { Config } from '../utils/config';
 import type { MdFileManager, MdFile } from './mdfile-manager';
+import type { NotificationBus } from './notification-bus';
 
 /**
  * Keeps the `central-md/` folder on disk in sync with the `md_files` table
@@ -24,10 +26,68 @@ import type { MdFileManager, MdFile } from './mdfile-manager';
  */
 export class CentralMdSyncService {
   private readonly dir: string;
+  private watcher: FSWatcher | null = null;
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private mdMgr: MdFileManager) {
+  constructor(
+    private mdMgr: MdFileManager,
+    private notificationBus?: NotificationBus,
+  ) {
     this.dir = Config.CENTRAL_MD_DIR;
     mkdirSync(this.dir, { recursive: true });
+  }
+
+  startWatching(): void {
+    if (this.watcher) return;
+
+    this.watcher = chokidar.watch(this.dir, {
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 150,
+        pollInterval: 25,
+      },
+    });
+
+    const onDiskChange = (path: string) => {
+      if (!path.toLowerCase().endsWith('.md')) return;
+      this.scheduleSync();
+    };
+
+    this.watcher.on('add', onDiskChange);
+    this.watcher.on('change', onDiskChange);
+    this.watcher.on('unlink', onDiskChange);
+    this.watcher.on('ready', () => {
+      this.scheduleSync();
+    });
+    this.watcher.on('error', (error) => {
+      console.warn('[CentralMdSync] watcher error:', error);
+    });
+  }
+
+  async stopWatching(): Promise<void> {
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
+    }
+
+    if (this.watcher) {
+      await this.watcher.close();
+      this.watcher = null;
+    }
+  }
+
+  private scheduleSync(): void {
+    if (this.syncTimer) clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => {
+      this.syncTimer = null;
+      try {
+        if (this.fullSync()) {
+          this.notificationBus?.emitMdFilesChanged({ scope: 'central' });
+        }
+      } catch (error) {
+        console.warn('[CentralMdSync] live sync failed:', error);
+      }
+    }, 100);
   }
 
   /** Write a single central MD file to disk. Call after DB create/update. */
@@ -56,8 +116,9 @@ export class CentralMdSyncService {
    * - DB rows not on disk  → write file to disk (DB-created in app)
    * - Both exist, content differs → disk wins (CLI edited while app was off)
    */
-  fullSync(): void {
+  fullSync(): boolean {
     mkdirSync(this.dir, { recursive: true });
+    let changed = false;
 
     // Index current DB rows by filename
     const dbFiles = this.mdMgr.list('central') as MdFile[];
@@ -68,7 +129,7 @@ export class CentralMdSyncService {
     try {
       diskFilenames = readdirSync(this.dir).filter((f) => f.endsWith('.md'));
     } catch {
-      return; // dir not readable — skip
+      return false; // dir not readable — skip
     }
     const diskSet = new Set(diskFilenames);
 
@@ -80,6 +141,7 @@ export class CentralMdSyncService {
         if (!dbRow) {
           // New file created by CLI — add to DB
           this.mdMgr.create('central', null, filename, diskContent);
+          changed = true;
           console.log(`[CentralMdSync] imported from disk: ${filename}`);
         } else {
           // File exists in both — check content
@@ -87,6 +149,7 @@ export class CentralMdSyncService {
           if (dbContent !== diskContent) {
             // Disk wins (was edited while app was off)
             this.mdMgr.write(dbRow.id, diskContent);
+            changed = true;
             console.log(`[CentralMdSync] updated from disk: ${filename}`);
           }
         }
@@ -101,11 +164,14 @@ export class CentralMdSyncService {
         try {
           const { content } = this.mdMgr.read(dbFile.id);
           writeFileSync(join(this.dir, dbFile.path), content, 'utf-8');
+          changed = true;
           console.log(`[CentralMdSync] exported to disk: ${dbFile.path}`);
         } catch (e) {
           console.warn(`[CentralMdSync] error exporting ${dbFile.path}:`, e);
         }
       }
     }
+
+    return changed;
   }
 }

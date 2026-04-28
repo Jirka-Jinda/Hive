@@ -12,6 +12,7 @@ import SettingsModal from './SettingsModal';
 import PipelineModal from './PipelineModal';
 import UsageModal from './UsageModal';
 import InstallToolsModal from './InstallToolsModal';
+import GitHistoryModal from './GitHistoryModal';
 import PromptPanel from '../Prompt/PromptPanel';
 import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
@@ -32,12 +33,13 @@ export default function AppShell() {
     const [showPrompts, setShowPrompts] = useState(false);
     const [showAutomation, setShowAutomation] = useState(false);
     const [showUsage, setShowUsage] = useState(false);
+    const [showGitHistory, setShowGitHistory] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
 
-    const sidebar = useDragResize(260, 180, 520, 'right');
-    const mdPanel = useDragResize(260, 160, 440, 'left');
+    const sidebar = useDragResize(320, 180, 560, 'right');
+    const mdPanel = useDragResize(320, 160, 520, 'left');
     const {
         summary: usageSummary,
         loading: usageLoading,
@@ -49,9 +51,10 @@ export default function AppShell() {
     const activeSessionRepo = selectedSession
         ? repos.find((repo) => repo.id === selectedSession.repo_id) ?? null
         : null;
-    const canOpenSessionRepoInVsCode = Boolean(
-        selectedSession && activeSessionRepo?.path && window.electronAPI?.isDesktop,
-    );
+    const gitContextRepo = selectedSession ? activeSessionRepo ?? selectedRepo : selectedRepo;
+    const openInVsCodeTargetPath = selectedSession?.worktree_path ?? gitContextRepo?.path ?? null;
+    const canOpenTargetInVsCode = Boolean(openInVsCodeTargetPath && window.electronAPI?.isDesktop);
+    const canShowGitHistory = Boolean(gitContextRepo?.is_git_repo);
 
     const syncBrowserFullscreen = useCallback(() => {
         setIsFullscreen(Boolean(document.fullscreenElement));
@@ -76,15 +79,15 @@ export default function AppShell() {
         }
     }, []);
 
-    const openSelectedSessionRepoInVsCode = useCallback(async () => {
-        if (!activeSessionRepo?.path || !window.electronAPI?.openInVsCode) return;
+    const openSelectedContextInVsCode = useCallback(async () => {
+        if (!openInVsCodeTargetPath || !window.electronAPI?.openInVsCode) return;
 
         try {
-            await window.electronAPI.openInVsCode(activeSessionRepo.path);
+            await window.electronAPI.openInVsCode(openInVsCodeTargetPath);
         } catch (error) {
             console.error('Failed to open repository in VS Code', error);
         }
-    }, [activeSessionRepo?.path]);
+    }, [openInVsCodeTargetPath]);
 
     const formatTokenUsage = useCallback((value: number) => {
         return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: value >= 1000 ? 1 : 0 }).format(value);
@@ -104,6 +107,12 @@ export default function AppShell() {
             setShowUsage(false);
         }
     }, [tokenUsageEnabled]);
+
+    useEffect(() => {
+        if (!canShowGitHistory) {
+            setShowGitHistory(false);
+        }
+    }, [canShowGitHistory]);
 
     useEffect(() => {
         if (window.electronAPI?.isDesktop) {
@@ -233,10 +242,32 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
-                            {canOpenSessionRepoInVsCode && activeSessionRepo && (
+                            <button
+                                onClick={() => setShowGitHistory(true)}
+                                title={canShowGitHistory
+                                    ? selectedSession
+                                        ? `Git history for ${selectedSession.name}`
+                                        : `Git history for ${gitContextRepo?.name}`
+                                    : 'Select a git repository to view history'}
+                                className={`${iconBtnBase} ${canShowGitHistory
+                                    ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                    : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
+                                    }`}
+                                disabled={!canShowGitHistory}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <circle cx="6.5" cy="6.5" r="2.25" />
+                                    <circle cx="6.5" cy="17.5" r="2.25" />
+                                    <circle cx="17.5" cy="12" r="2.25" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 6.5h4a3 3 0 013 3v0M8.5 17.5h4a3 3 0 003-3v0" />
+                                </svg>
+                            </button>
+                            {canOpenTargetInVsCode && gitContextRepo && (
                                 <button
-                                    onClick={() => void openSelectedSessionRepoInVsCode()}
-                                    title={`Open ${activeSessionRepo.name} in VS Code`}
+                                    onClick={() => void openSelectedContextInVsCode()}
+                                    title={selectedSession
+                                        ? `Open ${selectedSession.name} worktree in VS Code`
+                                        : `Open ${gitContextRepo.name} in VS Code`}
                                     className={iconBtnDefault}
                                 >
                                     <img src="/visual-studio.png" alt="" className="w-4 h-4 object-contain" />
@@ -453,6 +484,13 @@ export default function AppShell() {
             )}
             {showInstallTools && (
                 <InstallToolsModal onClose={() => { setShowInstallTools(false); api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { }); }} />
+            )}
+            {showGitHistory && gitContextRepo && gitContextRepo.is_git_repo && (
+                <GitHistoryModal
+                    repo={gitContextRepo}
+                    session={selectedSession}
+                    onClose={() => setShowGitHistory(false)}
+                />
             )}
             {showPrompts && <PromptPanel onClose={() => setShowPrompts(false)} />}
             {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}

@@ -18,4 +18,13 @@ export function setupNotifyServer(wss: WebSocketServer, bus: NotificationBus): v
       }
     }
   });
+
+  bus.onMdFilesChanged((event) => {
+    const msg = JSON.stringify({ type: 'md-files-changed', ...event });
+    for (const ws of clients) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
+      }
+    }
+  });
 }

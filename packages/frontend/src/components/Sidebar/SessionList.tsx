@@ -1,9 +1,34 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
-import type { MdFile, Session } from '../../api/client';
+import type { GitBranchOption, MdFile, Session } from '../../api/client';
 import AgentPicker from './AgentPicker';
 import MdFilePicker from './MdFilePicker';
+
+function getSessionBranchLabel(session: Session): string | null {
+    if (session.is_detached) {
+        return session.head_ref ?? 'HEAD';
+    }
+
+    return session.current_branch ?? session.initial_branch_name ?? null;
+}
+
+function getSessionStateMeta(state: Session['state']) {
+    switch (state) {
+        case 'idle':
+            return {
+                dotClass: 'bg-green-400 shadow-[0_0_0_1px_rgba(74,222,128,0.35)]',
+            };
+        case 'working':
+            return {
+                dotClass: 'bg-amber-400 animate-pulse shadow-[0_0_0_1px_rgba(251,191,36,0.35)]',
+            };
+        default:
+            return {
+                dotClass: 'bg-gray-500 shadow-[0_0_0_1px_rgba(156,163,175,0.35)]',
+            };
+    }
+}
 
 function EditIcon() {
     return (
@@ -26,27 +51,22 @@ function ActionButton({
     onClick,
     children,
     tone = 'default',
-    visible,
     disabled = false,
 }: {
     title: string;
     onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
     children: React.ReactNode;
     tone?: 'default' | 'danger';
-    visible: boolean;
     disabled?: boolean;
 }) {
     return (
         <button
             onClick={onClick}
             disabled={disabled}
-            className={`inline-flex items-center justify-center w-6 h-6 rounded-md ml-1 shrink-0 transition-all ${visible
-                ? tone === 'danger'
-                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-900/45 hover:text-white'
-                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
-                : tone === 'danger'
-                    ? 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-red-300 hover:bg-red-950/50'
-                    : 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-orange-200 hover:bg-white/10'
+            aria-label={title}
+            className={`inline-flex items-center justify-center w-6 h-6 rounded-md shrink-0 transition-all ${tone === 'danger'
+                ? 'bg-red-950/20 text-red-200 hover:bg-red-900/35 hover:text-white'
+                : 'bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
             title={title}
         >
@@ -62,6 +82,7 @@ export default function SessionList() {
         setSessions,
         selectedSession,
         setSelectedSession,
+        updateRepo,
         updateSession,
         bumpSessionTerminalVersion,
         mdFiles,
@@ -83,6 +104,12 @@ export default function SessionList() {
     const [editingSessionRefs, setEditingSessionRefs] = useState<number[]>([]);
     const [savingEdit, setSavingEdit] = useState(false);
     const [restartingSessionId, setRestartingSessionId] = useState<number | null>(null);
+    const [refreshingSessions, setRefreshingSessions] = useState(false);
+    const [branchMode, setBranchMode] = useState<'new' | 'existing'>('new');
+    const [branchName, setBranchName] = useState('');
+    const [branchSearch, setBranchSearch] = useState('');
+    const [branchOptions, setBranchOptions] = useState<GitBranchOption[]>([]);
+    const [branchesLoading, setBranchesLoading] = useState(false);
 
     useEffect(() => {
         if (!selectedSession || !selectedRepo) { setSessionRefs([]); return; }
@@ -91,11 +118,69 @@ export default function SessionList() {
             .catch(() => setSessionRefs([]));
     }, [selectedSession?.id, selectedRepo?.id]);
 
+    useEffect(() => {
+        if (!selectedRepo?.is_git_repo || !showNew || branchMode !== 'existing') {
+            setBranchOptions([]);
+            setBranchesLoading(false);
+            return;
+        }
+
+        let cancelled = false;
+        setBranchesLoading(true);
+        api.repos.git.branches.list(selectedRepo.id, branchSearch.trim() || undefined)
+            .then((branches) => {
+                if (!cancelled) setBranchOptions(branches);
+            })
+            .catch(() => {
+                if (!cancelled) setBranchOptions([]);
+            })
+            .finally(() => {
+                if (!cancelled) setBranchesLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [branchMode, branchSearch, selectedRepo?.id, selectedRepo?.is_git_repo, showNew]);
+
     if (!selectedRepo) return null;
+
+    const resetCreateForm = () => {
+        setName('');
+        setAgentType('');
+        setCredId(undefined);
+        setSelectedRefs([]);
+        setBranchMode('new');
+        setBranchName('');
+        setBranchSearch('');
+        setBranchOptions([]);
+    };
+
+    const refreshSessions = async () => {
+        if (!selectedRepo) return;
+        setRefreshingSessions(true);
+        setErrorMsg('');
+        try {
+            const nextSessions = await api.repos.sessions.list(selectedRepo.id);
+            setSessions(nextSessions);
+            if (selectedSession) {
+                setSelectedSession(nextSessions.find((session) => session.id === selectedSession.id) ?? null);
+            }
+        } catch (e: unknown) {
+            setErrorMsg(e instanceof Error ? e.message : 'Failed to refresh sessions');
+        } finally {
+            setRefreshingSessions(false);
+        }
+    };
 
     const createSession = async () => {
         if (!name.trim() || !agentType) {
             setErrorMsg('Name and agent are required');
+            return;
+        }
+        const trimmedBranchName = branchName.trim();
+        if (selectedRepo.is_git_repo && !trimmedBranchName) {
+            setErrorMsg(branchMode === 'new' ? 'Branch name is required for git sessions' : 'Select an available branch');
             return;
         }
         setCreating(true);
@@ -105,18 +190,18 @@ export default function SessionList() {
                 name: name.trim(),
                 agentType,
                 credentialId: credId,
+                branchMode: selectedRepo.is_git_repo ? branchMode : undefined,
+                branchName: selectedRepo.is_git_repo ? trimmedBranchName : undefined,
             });
             // Save MD refs BEFORE connecting the terminal (terminal reads refs on PTY spawn)
             if (selectedRefs.length > 0) {
                 await api.repos.sessions.mdRefs.set(selectedRepo.id, session.id, selectedRefs);
             }
             setSessions([session, ...sessions]);
+            updateRepo({ ...selectedRepo, session_count: sessions.length + 1 });
             setSelectedSession(session);
             setShowNew(false);
-            setName('');
-            setAgentType('');
-            setCredId(undefined);
-            setSelectedRefs([]);
+            resetCreateForm();
         } catch (e: unknown) {
             setErrorMsg(e instanceof Error ? e.message : 'Failed to create session');
         } finally {
@@ -130,6 +215,7 @@ export default function SessionList() {
         try {
             await api.repos.sessions.delete(selectedRepo.id, id);
             setSessions(sessions.filter((s) => s.id !== id));
+            updateRepo({ ...selectedRepo, session_count: Math.max(0, sessions.length - 1) });
             if (selectedSession?.id === id) setSelectedSession(null);
         } catch (e: unknown) {
             setErrorMsg(e instanceof Error ? e.message : 'Failed to delete session');
@@ -140,7 +226,7 @@ export default function SessionList() {
     };
 
     const startEditingSession = async (session: Session) => {
-        if (selectedSession?.id !== session.id) return;
+        setSelectedSession(session);
         setErrorMsg('');
         try {
             const refs = await api.repos.sessions.mdRefs.get(selectedRepo.id, session.id);
@@ -207,15 +293,31 @@ export default function SessionList() {
                 <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                     Sessions
                 </span>
-                <button
-                    onClick={() => { setShowNew(!showNew); setErrorMsg(''); }}
-                    className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${showNew
-                        ? 'bg-orange-600 border-orange-500 text-white'
-                        : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
-                        }`}
-                >
-                    {showNew ? '✕' : '+ Add'}
-                </button>
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={() => { void refreshSessions(); }}
+                        title="Refresh sessions"
+                        disabled={refreshingSessions}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        <RefreshIcon spinning={refreshingSessions} />
+                    </button>
+                    <button
+                        onClick={() => {
+                            setShowNew(!showNew);
+                            setErrorMsg('');
+                            if (showNew) {
+                                resetCreateForm();
+                            }
+                        }}
+                        className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${showNew
+                            ? 'bg-orange-600 border-orange-500 text-white'
+                            : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
+                            }`}
+                    >
+                        {showNew ? '✕' : '+ Add'}
+                    </button>
+                </div>
             </div>
 
             {showNew && (
@@ -234,6 +336,106 @@ export default function SessionList() {
                         onAgentChange={setAgentType}
                         onCredentialChange={setCredId}
                     />
+                    {selectedRepo.is_git_repo && (
+                        <div className="rounded-lg border border-gray-700/60 bg-gray-900/40 p-2.5 space-y-2">
+                            <div>
+                                <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Git Branch</div>
+                                <p className="mt-1 text-[11px] text-gray-500">
+                                    Create an isolated worktree from a new branch or attach this session to an available local branch.
+                                </p>
+                            </div>
+                            <div className="flex gap-1 p-0.5 bg-gray-950/80 rounded border border-gray-700/60">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setBranchMode('new');
+                                        setBranchName('');
+                                        setBranchSearch('');
+                                    }}
+                                    className={`flex-1 text-xs py-1 rounded transition-all font-medium ${branchMode === 'new'
+                                        ? 'bg-orange-600 text-white shadow-sm'
+                                        : 'text-gray-400 hover:text-gray-200'
+                                        }`}
+                                >
+                                    New branch
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setBranchMode('existing');
+                                        setBranchName('');
+                                    }}
+                                    className={`flex-1 text-xs py-1 rounded transition-all font-medium ${branchMode === 'existing'
+                                        ? 'bg-orange-600 text-white shadow-sm'
+                                        : 'text-gray-400 hover:text-gray-200'
+                                        }`}
+                                >
+                                    Existing branch
+                                </button>
+                            </div>
+
+                            {branchMode === 'new' ? (
+                                <input
+                                    className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                    placeholder="Branch name"
+                                    value={branchName}
+                                    onChange={(e) => setBranchName(e.target.value)}
+                                />
+                            ) : (
+                                <div className="space-y-2">
+                                    <input
+                                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                        placeholder="Search existing branch"
+                                        value={branchSearch}
+                                        onChange={(e) => setBranchSearch(e.target.value)}
+                                    />
+                                    {branchesLoading ? (
+                                        <p className="text-xs text-gray-500">Loading branches…</p>
+                                    ) : branchOptions.length === 0 ? (
+                                        <p className="text-xs text-gray-500">No local branches match this filter.</p>
+                                    ) : (
+                                        <ul className="space-y-1 max-h-40 overflow-y-auto">
+                                            {branchOptions.map((branch) => {
+                                                const isSelected = branchName === branch.name;
+                                                return (
+                                                    <li key={branch.name} className="space-y-1">
+                                                        <button
+                                                            type="button"
+                                                            disabled={branch.in_use}
+                                                            onClick={() => setBranchName(branch.name)}
+                                                            className={`w-full text-left px-2.5 py-1.5 rounded-md border text-xs transition-all ${isSelected
+                                                                ? 'border-orange-500 bg-orange-600/20 text-orange-100'
+                                                                : branch.in_use
+                                                                    ? 'border-gray-800 bg-gray-950/70 text-gray-500 cursor-not-allowed'
+                                                                    : 'border-gray-700 bg-gray-900 text-gray-200 hover:border-gray-600 hover:bg-gray-850'
+                                                                }`}
+                                                        >
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className="font-medium truncate">{branch.name}</span>
+                                                                {branch.in_use ? (
+                                                                    <span className="text-[10px] uppercase tracking-wider text-red-300">In use</span>
+                                                                ) : isSelected ? (
+                                                                    <span className="text-[10px] uppercase tracking-wider text-orange-200">Selected</span>
+                                                                ) : null}
+                                                            </div>
+                                                        </button>
+                                                        {branch.disabled_reason && (
+                                                            <p className="px-1 text-[11px] text-gray-500">{branch.disabled_reason}</p>
+                                                        )}
+                                                    </li>
+                                                );
+                                            })}
+                                        </ul>
+                                    )}
+                                    {branchName && (
+                                        <p className="text-[11px] text-gray-400">
+                                            Selected branch: <span className="font-semibold text-gray-200">{branchName}</span>
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <MdFilePicker
                         files={mdFiles.filter((f) => f.type !== 'prompt')}
                         selected={selectedRefs}
@@ -260,137 +462,97 @@ export default function SessionList() {
                 }).map((session: Session) => {
                     const isActive = selectedSession?.id === session.id;
                     const isEditing = editingSessionId === session.id;
-                    const dotClass =
-                        session.state === 'idle'
-                            ? 'bg-green-400 shadow-[0_0_0_1px_rgba(74,222,128,0.35)]'
-                            : session.state === 'working'
-                                ? 'bg-amber-400 animate-pulse shadow-[0_0_0_1px_rgba(251,191,36,0.35)]'
-                                : 'bg-gray-500 shadow-[0_0_0_1px_rgba(156,163,175,0.35)]';
+                    const branchLabel = getSessionBranchLabel(session);
+                    const stateMeta = getSessionStateMeta(session.state);
                     return (
                         <li
                             key={session.id}
                             onClick={() => setSelectedSession(session)}
-                            className={`group rounded cursor-pointer text-sm ${isActive
-                                ? 'bg-orange-700 text-white'
-                                : 'text-gray-300 hover:bg-gray-800'
+                            className={`group rounded-lg border cursor-pointer text-sm ${isActive
+                                ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
+                                : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
                                 }`}
                         >
-                            <div className="flex items-center justify-between px-2 py-1.5">
-                                {confirmDeleteSessionId === session.id ? (
-                                    <>
-                                        <span className="text-xs text-gray-300 truncate">Delete {session.name}?</span>
-                                        <div className="flex gap-1 shrink-0 ml-1">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); void deleteSession(session.id); }}
-                                                disabled={deletingSession}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
-                                            >
-                                                {deletingSession ? '…' : 'Yes'}
-                                            </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(null); }}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
-                                            >
-                                                No
-                                            </button>
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        {isActive ? (
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-1.5 min-w-0">
-                                                    <span
-                                                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotClass} ring-2 ring-black/45 ring-offset-1 ring-offset-orange-700`}
-                                                    />
-                                                    <span className="truncate">{session.name}</span>
-                                                </div>
-                                                <div className="mt-1 flex items-center justify-between gap-2 min-w-0">
-                                                    <span className="text-xs shrink-0 text-orange-200">{session.agent_type}</span>
-                                                    <div className="flex items-center shrink-0">
-                                                        <ActionButton
-                                                            title="Restart session"
-                                                            visible={isActive}
-                                                            disabled={restartingSessionId === session.id}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                void restartSession(session);
-                                                            }}
-                                                        >
-                                                            <RefreshIcon spinning={restartingSessionId === session.id} />
-                                                        </ActionButton>
-                                                        <ActionButton
-                                                            title="Update session"
-                                                            visible={isActive}
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                if (isEditing) {
-                                                                    cancelEditingSession();
-                                                                    return;
-                                                                }
-                                                                void startEditingSession(session);
-                                                            }}
-                                                        >
-                                                            <EditIcon />
-                                                        </ActionButton>
-                                                        <ActionButton
-                                                            title="Delete session"
-                                                            visible={isActive}
-                                                            tone="danger"
-                                                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(session.id); }}
-                                                        >
-                                                            <span className="text-sm leading-none">×</span>
-                                                        </ActionButton>
-                                                    </div>
-                                                </div>
+                            <div className="px-2.5 py-2">
+                                <div className="flex items-start gap-2 min-w-0">
+                                    <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${stateMeta.dotClass} ${isActive ? 'ring-2 ring-black/45 ring-offset-1 ring-offset-orange-700/80' : ''}`} />
+                                    <span className={`flex-1 min-w-0 whitespace-normal break-words text-sm leading-5 font-medium ${isActive ? 'text-white' : 'text-gray-100'}`}>
+                                        {session.name}
+                                    </span>
+                                </div>
+
+                                <div className="mt-2 min-h-[1.5rem]">
+                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${branchLabel
+                                        ? isActive
+                                            ? 'border-orange-400/40 bg-orange-500/10 text-orange-100'
+                                            : 'border-gray-700 bg-gray-800/90 text-gray-300'
+                                        : isActive
+                                            ? 'border-white/10 bg-black/20 text-gray-200'
+                                            : 'border-gray-800 bg-gray-900/60 text-gray-500'
+                                        }`}>
+                                        <span className="truncate">{branchLabel ?? 'No branch'}</span>
+                                    </span>
+                                </div>
+
+                                <div className="mt-2 flex items-start justify-between gap-2">
+                                    <span className={`text-xs leading-6 ${isActive ? 'text-orange-100' : 'text-gray-400'}`}>
+                                        {session.agent_type}
+                                    </span>
+                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                        <ActionButton
+                                            title="Restart session"
+                                            disabled={restartingSessionId === session.id}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                void restartSession(session);
+                                            }}
+                                        >
+                                            <RefreshIcon spinning={restartingSessionId === session.id} />
+                                        </ActionButton>
+                                        <ActionButton
+                                            title="Update session"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (isEditing) {
+                                                    cancelEditingSession();
+                                                    return;
+                                                }
+                                                void startEditingSession(session);
+                                            }}
+                                        >
+                                            <EditIcon />
+                                        </ActionButton>
+                                        <ActionButton
+                                            title="Delete session"
+                                            tone="danger"
+                                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(session.id); }}
+                                        >
+                                            <span className="text-sm leading-none">×</span>
+                                        </ActionButton>
+                                    </div>
+                                </div>
+
+                                {confirmDeleteSessionId === session.id && (
+                                    <div className="mt-2 rounded-md border border-red-900/40 bg-red-950/20 px-2.5 py-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <span className="text-xs text-red-100/90 break-words">Delete {session.name}?</span>
+                                            <div className="flex items-center gap-1 shrink-0">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); void deleteSession(session.id); }}
+                                                    disabled={deletingSession}
+                                                    className="text-[10px] px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
+                                                >
+                                                    {deletingSession ? '…' : 'Yes'}
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(null); }}
+                                                    className="text-[10px] px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
+                                                >
+                                                    No
+                                                </button>
                                             </div>
-                                        ) : (
-                                            <>
-                                                <div className="flex items-center gap-1.5 min-w-0">
-                                                    <span
-                                                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotClass}`}
-                                                    />
-                                                    <span className="truncate">{session.name}</span>
-                                                    <span className="text-xs shrink-0 text-gray-500">{session.agent_type}</span>
-                                                </div>
-                                                <div className="flex items-center shrink-0">
-                                                    <ActionButton
-                                                        title="Restart session"
-                                                        visible={false}
-                                                        disabled={restartingSessionId === session.id}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            void restartSession(session);
-                                                        }}
-                                                    >
-                                                        <RefreshIcon spinning={restartingSessionId === session.id} />
-                                                    </ActionButton>
-                                                    <ActionButton
-                                                        title="Update session"
-                                                        visible={false}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            if (isEditing) {
-                                                                cancelEditingSession();
-                                                                return;
-                                                            }
-                                                            void startEditingSession(session);
-                                                        }}
-                                                    >
-                                                        <EditIcon />
-                                                    </ActionButton>
-                                                    <ActionButton
-                                                        title="Delete session"
-                                                        visible={false}
-                                                        tone="danger"
-                                                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(session.id); }}
-                                                    >
-                                                        <span className="text-sm leading-none">×</span>
-                                                    </ActionButton>
-                                                </div>
-                                            </>
-                                        )}
-                                    </>
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                             {isActive && !isEditing && sessionRefs.length > 0 && (
@@ -443,7 +605,7 @@ export default function SessionList() {
                 })}
                 {sessions.length === 0 && (
                     <li className="text-xs text-gray-600 px-2 py-2 italic">
-                        No sessions — click + New to start one
+                        No sessions — click + Add to start one
                     </li>
                 )}
             </ul>

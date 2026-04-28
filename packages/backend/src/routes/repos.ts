@@ -7,6 +7,15 @@ import { jsonRoute, parseIdParam } from './route-utils';
 export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefService): Hono {
   const app = new Hono();
 
+  const parseOptionalQueryId = (raw: string | undefined, name: string): number | undefined => {
+    if (!raw) return undefined;
+    const value = parseInt(raw, 10);
+    if (Number.isNaN(value)) {
+      throw new Error(`${name} must be a number`);
+    }
+    return value;
+  };
+
   app.get('/', (c) => c.json(workspace.listRepos()));
 
   app.get('/discovered', (c) => c.json(workspace.discoverRepos()));
@@ -28,10 +37,35 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     return jsonRoute(c, () => workspace.updateRepo(repoId, { name: body.name! }), { errorStatus: 404 });
   });
 
-  app.delete('/:id', (c) => jsonRoute(c, () => {
+  app.delete('/:id', (c) => jsonRoute(c, async () => {
     const deleteFromDisk = c.req.query('deleteFromDisk') === 'true';
-    workspace.deleteRepo(parseIdParam(c, 'id'), deleteFromDisk);
+    await workspace.deleteRepo(parseIdParam(c, 'id'), deleteFromDisk);
     return { ok: true };
+  }, { errorStatus: 404 }));
+
+  app.get('/:id/git/branches', (c) => jsonRoute(c, () => {
+    return workspace.listGitBranches(parseIdParam(c, 'id'), c.req.query('q') ?? undefined);
+  }, { errorStatus: 404 }));
+
+  app.get('/:id/git/status', (c) => jsonRoute(c, () => {
+    return workspace.getGitStatus(
+      parseIdParam(c, 'id'),
+      parseOptionalQueryId(c.req.query('sessionId'), 'sessionId'),
+    );
+  }, { errorStatus: 404 }));
+
+  app.get('/:id/git/history', (c) => jsonRoute(c, () => {
+    const limitRaw = c.req.query('limit');
+    const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
+    if (limitRaw && Number.isNaN(limit)) {
+      throw new Error('limit must be a number');
+    }
+
+    return workspace.getGitHistory(
+      parseIdParam(c, 'id'),
+      parseOptionalQueryId(c.req.query('sessionId'), 'sessionId'),
+      limit,
+    );
   }, { errorStatus: 404 }));
 
   // --- Sessions sub-resource ---
@@ -43,6 +77,8 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
       name: string;
       agentType: string;
       credentialId?: number;
+      branchMode?: 'new' | 'existing';
+      branchName?: string;
     }>();
     if (!body.name?.trim() || !body.agentType?.trim()) {
       return c.json({ error: 'name and agentType are required' }, 400);
@@ -53,11 +89,13 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
         name: body.name,
         agentType: body.agentType,
         credentialId: body.credentialId,
+        branchMode: body.branchMode,
+        branchName: body.branchName,
       }), { successStatus: 201, errorStatus: 400 });
   });
 
-  app.delete('/:id/sessions/:sid', (c) => jsonRoute(c, () => {
-    workspace.deleteSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid'));
+  app.delete('/:id/sessions/:sid', (c) => jsonRoute(c, async () => {
+    await workspace.deleteSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid'));
     return { ok: true };
   }, { errorStatus: 404 }));
 

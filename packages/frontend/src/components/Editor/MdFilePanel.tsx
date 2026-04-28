@@ -19,6 +19,48 @@ const TYPE_ORDER: Record<MdFile['type'], number> = { skill: 0, tool: 1, instruct
 const sortByType = (files: MdFile[]) =>
     [...files].sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
 
+function EditIcon() {
+    return (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.86 4.49a2.1 2.1 0 112.97 2.97L9 18.3l-4 1 1-4L16.86 4.49z" />
+        </svg>
+    );
+}
+
+function ActionButton({
+    title,
+    onClick,
+    children,
+    tone = 'default',
+    visible,
+    disabled = false,
+}: {
+    title: string;
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+    children: React.ReactNode;
+    tone?: 'default' | 'danger';
+    visible: boolean;
+    disabled?: boolean;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className={`inline-flex items-center justify-center w-6 h-6 rounded-md ml-1 shrink-0 transition-all ${visible
+                ? tone === 'danger'
+                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-900/45 hover:text-white'
+                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
+                : tone === 'danger'
+                    ? 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-red-300 hover:bg-red-950/50'
+                    : 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-orange-200 hover:bg-white/10'
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+            title={title}
+        >
+            {children}
+        </button>
+    );
+}
+
 export default function MdFilePanel({ onCollapse }: Props) {
     const { mdFiles, setMdFiles, selectedRepo, setSelectedMdFile, selectedMdFile } = useAppStore();
     const [createForScope, setCreateForScope] = useState<'central' | 'repo' | null>(null);
@@ -34,6 +76,9 @@ export default function MdFilePanel({ onCollapse }: Props) {
     const [promptCreating, setPromptCreating] = useState(false);
     const [promptNewName, setPromptNewName] = useState('');
     const [promptCreatingBusy, setPromptCreatingBusy] = useState(false);
+    const [editingFileId, setEditingFileId] = useState<number | null>(null);
+    const [editingFileName, setEditingFileName] = useState('');
+    const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
 
     const centralFiles = sortByType(mdFiles.filter((f) => f.scope === 'central'));
     const centralNonPromptFiles = centralFiles.filter((f) => f.type !== 'prompt');
@@ -43,6 +88,12 @@ export default function MdFilePanel({ onCollapse }: Props) {
     useEffect(() => {
         if (!selectedRepo && createForScope === 'repo') setCreateForScope(null);
     }, [createForScope, selectedRepo]);
+
+    const cancelEditingFile = () => {
+        setEditingFileId(null);
+        setEditingFileName('');
+        setRenamingFileId(null);
+    };
 
     const startCreate = (scope: 'central' | 'repo') => {
         setCreateForScope(scope);
@@ -116,6 +167,38 @@ export default function MdFilePanel({ onCollapse }: Props) {
         }
     };
 
+    const startEditingFile = (file: MdFile) => {
+        setErrorMsg('');
+        setConfirmDeleteId(null);
+        setEditingFileId(file.id);
+        setEditingFileName(file.path.split(/[\/\\]/).pop() ?? file.path);
+    };
+
+    const renameFile = async (file: MdFile) => {
+        const nextName = editingFileName.trim();
+        if (!nextName) {
+            setErrorMsg('Filename is required');
+            return;
+        }
+
+        setRenamingFileId(file.id);
+        try {
+            setErrorMsg('');
+            const updated = await api.mdfiles.update(file.id, { filename: nextName });
+            const { mdFiles: currentMdFiles, selectedMdFile: currentSelectedMdFile } = useAppStore.getState();
+
+            setMdFiles(currentMdFiles.map((existing) => (existing.id === file.id ? { ...existing, ...updated } : existing)));
+            if (currentSelectedMdFile?.id === file.id) {
+                setSelectedMdFile({ ...currentSelectedMdFile, ...updated });
+            }
+            cancelEditingFile();
+        } catch (e: unknown) {
+            setErrorMsg(e instanceof Error ? e.message : 'Failed to rename file');
+        } finally {
+            setRenamingFileId(null);
+        }
+    };
+
     const createFile = async () => {
         if (!newName.trim() || !createForScope) return;
         setCreating(true);
@@ -184,6 +267,114 @@ Repo: {{repo}}  \nSession: {{session}}
         }
     };
 
+    const renderFileItem = (f: MdFile) => {
+        const isPendingDelete = confirmDeleteId === f.id;
+        const isEditing = editingFileId === f.id;
+        const isActive = selectedMdFile?.id === f.id;
+        const isRenaming = renamingFileId === f.id;
+        const filename = f.path.split(/[\/\\]/).pop() ?? f.path;
+
+        return (
+            <div
+                key={f.id}
+                onClick={() => !isPendingDelete && !isEditing && openFile(f)}
+                className={`group rounded-lg border cursor-pointer text-xs transition-all ${isPendingDelete
+                    ? 'border-gray-800 bg-gray-800'
+                    : isActive
+                        ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
+                        : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
+                    }`}
+            >
+                {isPendingDelete ? (
+                    <div className="flex items-center justify-between px-2 py-1.5 gap-2">
+                        <span className="text-xs text-gray-400 truncate">
+                            Delete {filename}?
+                        </span>
+                        <div className="flex gap-1 shrink-0">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); void deleteFile(f.id); }}
+                                disabled={deleting}
+                                className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
+                            >
+                                {deleting ? '\u2026' : 'Yes'}
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
+                                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
+                            >
+                                No
+                            </button>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <div className="flex items-center justify-between px-2 py-1.5">
+                            <span className="truncate flex items-center gap-1.5">
+                                <span className="opacity-60">{typeIcon[f.type]}</span>
+                                {filename}
+                            </span>
+                            <div className="flex items-center shrink-0">
+                                <ActionButton
+                                    title="Rename file"
+                                    visible={isActive || isEditing}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isEditing) {
+                                            cancelEditingFile();
+                                            return;
+                                        }
+                                        startEditingFile(f);
+                                    }}
+                                >
+                                    <EditIcon />
+                                </ActionButton>
+                                <ActionButton
+                                    title="Delete file"
+                                    visible={isActive && !isEditing}
+                                    tone="danger"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        cancelEditingFile();
+                                        setConfirmDeleteId(f.id);
+                                    }}
+                                >
+                                    <span className="text-sm leading-none">×</span>
+                                </ActionButton>
+                            </div>
+                        </div>
+                        {isEditing && (
+                            <div className="px-2 pb-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                    className="w-full bg-gray-950/80 border border-orange-500/30 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                    value={editingFileName}
+                                    onChange={(e) => setEditingFileName(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && void renameFile(f)}
+                                    placeholder="filename.md"
+                                    autoFocus
+                                />
+                                <div className="flex gap-1.5">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); void renameFile(f); }}
+                                        disabled={isRenaming}
+                                        className="flex-1 text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {isRenaming ? 'Saving…' : 'Save'}
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); cancelEditingFile(); }}
+                                        className="text-xs px-3 py-1.5 rounded-md border border-gray-700 bg-gray-800 text-gray-300 hover:text-white font-medium transition-all"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        );
+    };
+
     // Called as a plain function (not a React component) to avoid remount on each render
     const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo') => {
         const isCreating = createForScope === scope;
@@ -250,58 +441,7 @@ Repo: {{repo}}  \nSession: {{session}}
                         Drop to import .md file
                     </div>
                 ) : (
-                    files.map((f) => {
-                        const isPendingDelete = confirmDeleteId === f.id;
-                        return (
-                            <div
-                                key={f.id}
-                                onClick={() => !isPendingDelete && openFile(f)}
-                                className={`group rounded-md cursor-pointer text-xs transition-all ${isPendingDelete
-                                    ? 'bg-gray-800'
-                                    : selectedMdFile?.id === f.id
-                                        ? 'bg-orange-700/80 text-white'
-                                        : 'text-gray-300 hover:bg-gray-800'
-                                    }`}
-                            >
-                                {isPendingDelete ? (
-                                    <div className="flex items-center justify-between px-2 py-1.5 gap-2">
-                                        <span className="text-xs text-gray-400 truncate">
-                                            Delete {f.path.split(/[\/\\]/).pop()}?
-                                        </span>
-                                        <div className="flex gap-1 shrink-0">
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); void deleteFile(f.id); }}
-                                                disabled={deleting}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
-                                            >
-                                                {deleting ? '\u2026' : 'Yes'}
-                                            </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
-                                            >
-                                                No
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center justify-between px-2 py-1.5">
-                                        <span className="truncate flex items-center gap-1.5">
-                                            <span className="opacity-60">{typeIcon[f.type]}</span>
-                                            {f.path.split(/[\/\\]/).pop()}
-                                        </span>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(f.id); }}
-                                            className="inline-flex items-center justify-center w-4 h-4 rounded text-gray-600 hover:text-red-400 hover:bg-red-950/40 ml-1 opacity-0 group-hover:opacity-100 transition-all text-sm shrink-0"
-                                            title="Delete"
-                                        >
-                                            {'×'}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })
+                    files.map(renderFileItem)
                 )}
             </div>
         );
@@ -408,43 +548,7 @@ Focus on {{focus}}.`
                     {promptFiles.length === 0 && !promptCreating ? (
                         <div className="text-xs text-gray-600 px-2 py-1 italic">No prompt templates yet</div>
                     ) : (
-                        promptFiles.map((f) => {
-                            const isPendingDelete = confirmDeleteId === f.id;
-                            return (
-                                <div
-                                    key={f.id}
-                                    onClick={() => !isPendingDelete && openFile(f)}
-                                    className={`group rounded-md cursor-pointer text-xs transition-all ${isPendingDelete
-                                            ? 'bg-gray-800'
-                                            : selectedMdFile?.id === f.id
-                                                ? 'bg-orange-700/80 text-white'
-                                                : 'text-gray-300 hover:bg-gray-800'
-                                        }`}
-                                >
-                                    {isPendingDelete ? (
-                                        <div className="flex items-center justify-between px-2 py-1.5 gap-2">
-                                            <span className="text-xs text-gray-400 truncate">Delete {f.path.split(/[\/\\]/).pop()}?</span>
-                                            <div className="flex gap-1 shrink-0">
-                                                <button onClick={(e) => { e.stopPropagation(); void deleteFile(f.id); }} disabled={deleting} className="text-[10px] px-2 py-0.5 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40">{deleting ? '…' : 'Yes'}</button>
-                                                <button onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }} className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all">No</button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="flex items-center justify-between px-2 py-1.5">
-                                            <span className="truncate flex items-center gap-1.5">
-                                                <span className="opacity-60">📝</span>
-                                                {f.path.split(/[\/\\]/).pop()}
-                                            </span>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(f.id); }}
-                                                className="inline-flex items-center justify-center w-4 h-4 rounded text-gray-600 hover:text-red-400 hover:bg-red-950/40 ml-1 opacity-0 group-hover:opacity-100 transition-all text-sm shrink-0"
-                                                title="Delete"
-                                            >×</button>
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })
+                        promptFiles.map(renderFileItem)
                     )}
                 </div>
             </div>

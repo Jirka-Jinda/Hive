@@ -67,6 +67,7 @@ export interface Repo {
   source: 'local' | 'git';
   git_url: string | null;
   created_at: string;
+  session_count?: number;
   is_git_repo: boolean;
 }
 
@@ -78,8 +79,41 @@ export interface Session {
   name: string;
   status: 'running' | 'stopped';
   state: 'working' | 'idle' | 'stopped';
+  branch_mode?: 'new' | 'existing' | null;
+  initial_branch_name?: string | null;
+  worktree_path?: string | null;
+  current_branch?: string | null;
+  head_ref?: string | null;
+  is_detached?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface GitBranchOption {
+  name: string;
+  in_use: boolean;
+  worktree_path: string | null;
+  is_main_worktree: boolean;
+  session_id: number | null;
+  session_name: string | null;
+  disabled_reason: string | null;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  head_ref: string | null;
+  is_detached: boolean;
+  worktree_path: string;
+  repo_path: string;
+}
+
+export interface GitHistoryEntry {
+  hash: string;
+  short_hash: string;
+  subject: string;
+  author_name: string;
+  authored_at: string;
+  refs: string[];
 }
 
 export interface Credential {
@@ -105,6 +139,14 @@ export interface MdFile {
   type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
   created_at: string;
   updated_at: string;
+}
+
+export interface MdFileUpdateBody {
+  content?: string;
+  scope?: MdFile['scope'];
+  repoPath?: string;
+  filename?: string;
+  type?: MdFile['type'];
 }
 
 export interface ParamDef {
@@ -153,7 +195,7 @@ export const api = {
 
     sessions: {
       list: (repoId: number) => request<Session[]>(`/repos/${repoId}/sessions`),
-      create: (repoId: number, body: { name: string; agentType: string; credentialId?: number }) =>
+      create: (repoId: number, body: { name: string; agentType: string; credentialId?: number; branchMode?: 'new' | 'existing'; branchName?: string }) =>
         request<Session>(`/repos/${repoId}/sessions`, { method: 'POST', body: JSON.stringify(body) }),
       update: (repoId: number, sid: number, body: { name: string }) =>
         request<Session>(`/repos/${repoId}/sessions/${sid}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -187,6 +229,30 @@ export const api = {
           body: JSON.stringify({ mdFileIds }),
         }),
     },
+
+    git: {
+      branches: {
+        list: (repoId: number, query?: string) => {
+          const params = new URLSearchParams();
+          if (query?.trim()) params.set('q', query.trim());
+          const qs = params.toString();
+          return request<GitBranchOption[]>(`/repos/${repoId}/git/branches${qs ? `?${qs}` : ''}`);
+        },
+      },
+      status: (repoId: number, sessionId?: number) => {
+        const params = new URLSearchParams();
+        if (sessionId !== undefined) params.set('sessionId', String(sessionId));
+        const qs = params.toString();
+        return request<GitStatus | null>(`/repos/${repoId}/git/status${qs ? `?${qs}` : ''}`);
+      },
+      history: (repoId: number, options?: { sessionId?: number; limit?: number }) => {
+        const params = new URLSearchParams();
+        if (options?.sessionId !== undefined) params.set('sessionId', String(options.sessionId));
+        if (options?.limit !== undefined) params.set('limit', String(options.limit));
+        const qs = params.toString();
+        return request<GitHistoryEntry[]>(`/repos/${repoId}/git/history${qs ? `?${qs}` : ''}`);
+      },
+    },
   },
 
   credentials: {
@@ -217,10 +283,10 @@ export const api = {
       repoPath?: string;
       filename: string;
       content: string;
-      type?: string;
+      type?: MdFile['type'];
     }) => request<MdFile>('/mdfiles', { method: 'POST', body: JSON.stringify(body) }),
-    update: (id: number, content: string) =>
-      request<MdFile>(`/mdfiles/${id}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+    update: (id: number, body: MdFileUpdateBody) =>
+      request<MdFile>(`/mdfiles/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
     delete: (id: number) =>
       request<{ ok: boolean }>(`/mdfiles/${id}`, { method: 'DELETE' }),
     params: (id: number) =>

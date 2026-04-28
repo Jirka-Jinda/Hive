@@ -78,14 +78,16 @@ function getMachinePassword(): string {
 function findFreePort(preferred = 3000): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.listen(preferred, '127.0.0.1', () => {
+    // Match the backend's bind behavior. Probing only 127.0.0.1 can report a
+    // port as free even when another process already owns it on ::/0.0.0.0.
+    server.listen(preferred, () => {
       const { port } = server.address() as net.AddressInfo;
       server.close(() => resolve(port));
     });
     server.on('error', () => {
       // Preferred port is busy — ask OS for any free port.
       const fallback = net.createServer();
-      fallback.listen(0, '127.0.0.1', () => {
+      fallback.listen(0, () => {
         const { port } = fallback.address() as net.AddressInfo;
         fallback.close(() => resolve(port));
       });

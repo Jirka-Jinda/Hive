@@ -119,6 +119,7 @@ export default function RepoList() {
         ]);
         if (useAppStore.getState().selectedRepo?.id !== repo.id) return;
         const centralFiles = useAppStore.getState().mdFiles.filter((file) => file.scope === 'central');
+        updateRepo({ ...repo, session_count: sessions.length });
         setSessions(sessions);
         setMdFiles([...centralFiles, ...repoMdFiles]);
         setRepoRefs(refs);
@@ -358,9 +359,9 @@ export default function RepoList() {
                         <li
                             key={repo.id}
                             onClick={() => !isPendingRemove && selectRepo(repo)}
-                            className={`group rounded cursor-pointer text-sm ${isActive
-                                ? 'bg-orange-700 text-white'
-                                : 'text-gray-300 hover:bg-gray-800'
+                            className={`group rounded-lg border cursor-pointer text-sm ${isActive
+                                ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
+                                : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
                                 }`}
                         >
                             <div className="flex items-center justify-between px-2 py-1.5">
@@ -404,6 +405,17 @@ export default function RepoList() {
                                                 <RepoIcon isGitRepo={repo.is_git_repo} className="w-4 h-4" />
                                             </span>
                                             <span className="truncate">{repo.name}</span>
+                                            {(repo.session_count ?? 0) > 0 && (
+                                                <span
+                                                    className={`inline-flex items-center justify-center min-w-[1.15rem] h-4 px-1 rounded-full text-[10px] font-medium ${isActive
+                                                        ? 'bg-black/20 text-orange-100 ring-1 ring-black/10'
+                                                        : 'border border-gray-700/80 bg-gray-800 text-gray-400'
+                                                        }`}
+                                                    title={`${repo.session_count} session${repo.session_count === 1 ? '' : 's'}`}
+                                                >
+                                                    {repo.session_count}
+                                                </span>
+                                            )}
                                         </div>
                                         <div className="flex items-center shrink-0">
                                             <ActionButton
