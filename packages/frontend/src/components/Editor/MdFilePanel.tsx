@@ -48,8 +48,8 @@ function ActionButton({
             disabled={disabled}
             className={`inline-flex items-center justify-center w-6 h-6 rounded-md ml-1 shrink-0 transition-all ${visible
                 ? tone === 'danger'
-                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-900/45 hover:text-white'
-                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
+                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-800/60 hover:text-white hover:ring-red-700/40'
+                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-orange-600/35 hover:text-white hover:ring-orange-500/30'
                 : tone === 'danger'
                     ? 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-red-300 hover:bg-red-950/50'
                     : 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-orange-200 hover:bg-white/10'
@@ -473,8 +473,8 @@ Repo: {{repo}}  \nSession: {{session}}
                                 onClick={() => setShowGuide((v) => !v)}
                                 title="Template syntax guide"
                                 className={`inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold transition-all ${showGuide
-                                        ? 'bg-orange-600/30 border-orange-500/60 text-orange-300'
-                                        : 'bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
+                                    ? 'bg-orange-600/30 border-orange-500/60 text-orange-300'
+                                    : 'bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
                                     }`}
                             >
                                 ?
@@ -482,8 +482,8 @@ Repo: {{repo}}  \nSession: {{session}}
                             <button
                                 onClick={() => { setPromptCreating((v) => !v); setPromptNewName(''); setErrorMsg(''); }}
                                 className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${promptCreating
-                                        ? 'bg-orange-600 border-orange-500 text-white'
-                                        : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
+                                    ? 'bg-orange-600 border-orange-500 text-white'
+                                    : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
                                     }`}
                             >
                                 {promptCreating ? '✕' : '+ Add'}

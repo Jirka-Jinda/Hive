@@ -65,8 +65,8 @@ function ActionButton({
             disabled={disabled}
             aria-label={title}
             className={`inline-flex items-center justify-center w-6 h-6 rounded-md shrink-0 transition-all ${tone === 'danger'
-                ? 'bg-red-950/20 text-red-200 hover:bg-red-900/35 hover:text-white'
-                : 'bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
+                ? 'bg-red-950/20 text-red-200 hover:bg-red-800/60 hover:text-white'
+                : 'bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-orange-600/35 hover:text-white hover:ring-orange-500/30'
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
             title={title}
         >

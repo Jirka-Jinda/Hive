@@ -57,8 +57,8 @@ function ActionButton({
             disabled={disabled}
             className={`inline-flex items-center justify-center w-6 h-6 rounded-md ml-1 shrink-0 transition-all ${visible
                 ? tone === 'danger'
-                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-900/45 hover:text-white'
-                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-black/30 hover:text-white'
+                    ? 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-red-800/60 hover:text-white hover:ring-red-700/40'
+                    : 'opacity-100 bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-orange-600/35 hover:text-white hover:ring-orange-500/30'
                 : tone === 'danger'
                     ? 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-red-300 hover:bg-red-950/50'
                     : 'opacity-0 text-gray-500 group-hover:opacity-100 hover:text-orange-200 hover:bg-white/10'
