@@ -82,7 +82,7 @@ export default function SettingsModal({ onClose }: Props) {
                             Repositories Folder
                         </label>
                         <input
-                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all font-mono"
+                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all font-mono"
                             placeholder="C:\Code\Automation\repos"
                             value={reposDir}
                             onChange={(e) => { setReposDir(e.target.value); setSaved(false); }}
@@ -100,7 +100,7 @@ export default function SettingsModal({ onClose }: Props) {
                             Central MD Folder
                         </label>
                         <input
-                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all font-mono"
+                            className="w-full bg-gray-950 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all font-mono"
                             placeholder="C:\Code\Automation\central-md"
                             value={centralMdDir}
                             onChange={(e) => { setCentralMdDir(e.target.value); setSaved(false); }}
@@ -130,7 +130,7 @@ export default function SettingsModal({ onClose }: Props) {
                         {authEnabled && authView === 'idle' && (
                             <button
                                 onClick={() => setAuthView('change')}
-                                className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-amber-400 hover:border-amber-500/40 font-medium transition-all"
+                                className="text-xs px-3 py-1.5 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-orange-400 hover:border-orange-500/40 font-medium transition-all"
                             >
                                 Change PIN
                             </button>
@@ -163,7 +163,7 @@ export default function SettingsModal({ onClose }: Props) {
                     <button
                         onClick={handleSave}
                         disabled={saving || !reposDir.trim()}
-                        className="text-xs px-4 py-1.5 rounded border border-amber-500 bg-amber-600 hover:bg-amber-500 text-white font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="text-xs px-4 py-1.5 rounded border border-orange-500 bg-orange-600 hover:bg-orange-500 text-white font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? 'Saving…' : 'Save'}
                     </button>

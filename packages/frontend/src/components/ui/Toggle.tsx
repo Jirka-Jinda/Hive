@@ -6,7 +6,7 @@ interface ToggleProps {
 }
 
 /**
- * Shared accessible toggle switch — amber accent, consistent across all modals.
+ * Shared accessible toggle switch — orange accent, consistent across all modals.
  */
 export default function Toggle({ checked, onChange, disabled, title }: ToggleProps) {
     return (
@@ -17,8 +17,8 @@ export default function Toggle({ checked, onChange, disabled, title }: TogglePro
             onClick={onChange}
             disabled={disabled}
             title={title}
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500/40 disabled:opacity-40 ${
-                checked ? 'bg-amber-500 border-amber-400' : 'bg-gray-700 border-gray-600'
+            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full border transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500/40 disabled:opacity-40 ${
+                checked ? 'bg-orange-500 border-orange-400' : 'bg-gray-700 border-gray-600'
             }`}
         >
             <span

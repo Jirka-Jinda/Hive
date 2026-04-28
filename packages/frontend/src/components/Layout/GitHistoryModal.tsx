@@ -66,14 +66,14 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <div>
                         <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <circle cx="6.5" cy="6.5" r="2.25" />
                                 <circle cx="6.5" cy="17.5" r="2.25" />
                                 <circle cx="17.5" cy="12" r="2.25" />
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 6.5h4a3 3 0 013 3v0M8.5 17.5h4a3 3 0 003-3v0" />
                             </svg>
                             <span className="text-sm font-semibold text-gray-200">Git History</span>
-                            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-200">
+                            <span className="inline-flex items-center rounded-full border border-orange-500/40 bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-orange-200">
                                 {getHeadBadge(status)}
                             </span>
                         </div>

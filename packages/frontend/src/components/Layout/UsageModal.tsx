@@ -106,7 +106,7 @@ export default function UsageModal({ repoName, summary, loading, error, onRefres
                 <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
                     <div>
                         <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <svg className="w-4 h-4 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 19h16M7 15l3-3 2 2 5-6" />
                             </svg>
                             <span className="text-sm font-semibold text-gray-200">Token Usage</span>

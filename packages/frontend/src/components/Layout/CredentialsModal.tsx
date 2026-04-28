@@ -71,8 +71,8 @@ export default function CredentialsModal({ onClose }: Props) {
                         <button
                             onClick={() => { setShowCreate(!showCreate); setErrorMsg(''); }}
                             className={`inline-flex items-center gap-0.5 text-xs px-2.5 py-1 rounded border transition-all font-medium ${showCreate
-                                ? 'bg-amber-600 border-amber-500 text-white'
-                                : 'bg-gray-800 border-gray-700 text-amber-400 hover:bg-gray-750 hover:text-amber-300 hover:border-gray-600'
+                                ? 'bg-orange-600 border-orange-500 text-white'
+                                : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
                                 }`}
                         >
                             {showCreate ? '✕ Cancel' : '+ Add'}
@@ -89,14 +89,14 @@ export default function CredentialsModal({ onClose }: Props) {
                     {showCreate && (
                         <div className="mb-4 p-3 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-2">
                             <input
-                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all"
+                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                 placeholder="Profile name (e.g. My Claude Key)"
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 autoFocus
                             />
                             <select
-                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all"
+                                className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                 value={agentType}
                                 onChange={(e) => {
                                     setAgentType(e.target.value);
@@ -114,7 +114,7 @@ export default function CredentialsModal({ onClose }: Props) {
                                     <label className="text-xs text-gray-500 block mb-1 font-medium">{field.label}</label>
                                     <input
                                         type={field.secret ? 'password' : 'text'}
-                                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 transition-all"
+                                        className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                         placeholder={field.key}
                                         value={envVars[field.key] ?? ''}
                                         onChange={(e) =>
@@ -129,7 +129,7 @@ export default function CredentialsModal({ onClose }: Props) {
                             <button
                                 onClick={handleCreate}
                                 disabled={saving}
-                                className="w-full text-xs bg-amber-600 hover:bg-amber-500 border border-amber-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {saving ? 'Saving…' : 'Save Profile'}
                             </button>
