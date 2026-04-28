@@ -13,6 +13,7 @@ import PipelineModal from './PipelineModal';
 import UsageModal from './UsageModal';
 import InstallToolsModal from './InstallToolsModal';
 import GitHistoryModal from './GitHistoryModal';
+import LogsModal from './LogsModal';
 import PromptPanel from '../Prompt/PromptPanel';
 import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
@@ -34,6 +35,7 @@ export default function AppShell() {
     const [showAutomation, setShowAutomation] = useState(false);
     const [showUsage, setShowUsage] = useState(false);
     const [showGitHistory, setShowGitHistory] = useState(false);
+    const [showLogs, setShowLogs] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -322,6 +324,15 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
                                 </svg>
                             </button>
+                            <button
+                                onClick={() => setShowLogs(true)}
+                                title="Application Logs"
+                                className={iconBtnDefault}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                            </button>
                         </div>
 
                         <div className="w-px h-6 bg-gray-700/80" />
@@ -492,6 +503,7 @@ export default function AppShell() {
                     onClose={() => setShowGitHistory(false)}
                 />
             )}
+            {showLogs && <LogsModal onClose={() => setShowLogs(false)} />}
             {showPrompts && <PromptPanel onClose={() => setShowPrompts(false)} />}
             {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}
             <ToastContainer />

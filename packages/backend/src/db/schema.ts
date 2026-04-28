@@ -121,4 +121,21 @@ CREATE TABLE IF NOT EXISTS automation_tasks (
   next_run_at TEXT,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Application error log (errors / unhandled exceptions)
+CREATE TABLE IF NOT EXISTS app_error_logs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  message    TEXT NOT NULL,
+  stack      TEXT,
+  context    TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- User action log (major user-initiated events)
+CREATE TABLE IF NOT EXISTS user_action_logs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  action     TEXT NOT NULL,
+  detail     TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;

@@ -3,8 +3,9 @@ import type { MdFile, MdFileManager } from '../services/mdfile-manager';
 import { parseFrontmatter, renderTemplate } from '../utils/template';
 import { jsonRoute, parseIdParam } from './route-utils';
 import { getErrorMessage } from '../utils/errors';
+import type { LogService } from '../services/log-service';
 
-export function mdfilesRouter(mdMgr: MdFileManager): Hono {
+export function mdfilesRouter(mdMgr: MdFileManager, logService: LogService): Hono {
   const app = new Hono();
 
   app.get('/', (c) => {
@@ -23,7 +24,14 @@ export function mdfilesRouter(mdMgr: MdFileManager): Hono {
       type?: MdFile['type'];
     }>();
 
-    return jsonRoute(c, () => mdMgr.create(body.scope, body.repoPath ?? null, body.filename, body.content, body.type), {
+    return jsonRoute(c, () => {
+      const file = mdMgr.create(body.scope, body.repoPath ?? null, body.filename, body.content, body.type);
+      logService.logUserAction(
+        'create_md_file',
+        `Created "${body.filename}" (${body.type ?? 'other'}) in ${body.scope}${body.repoPath ? ` at ${body.repoPath}` : ''}`,
+      );
+      return file;
+    }, {
       successStatus: 201,
       errorStatus: 400,
     });
@@ -52,7 +60,10 @@ export function mdfilesRouter(mdMgr: MdFileManager): Hono {
   });
 
   app.delete('/:id', (c) => jsonRoute(c, () => {
-    mdMgr.delete(parseIdParam(c, 'id'));
+    const id = parseIdParam(c, 'id');
+    const { file } = mdMgr.read(id);
+    mdMgr.delete(id);
+    logService.logUserAction('delete_md_file', `Deleted "${file.path}"`);
     return { ok: true };
   }, { errorStatus: 404 }));
 

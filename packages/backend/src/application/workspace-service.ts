@@ -10,6 +10,7 @@ import { SessionStore } from '../services/session-store';
 import type { Session, SessionBranchMode, SessionWithGitStatus } from '../services/session-store';
 import type { SettingsService } from '../services/settings-service';
 import { discoverRepoMdFiles } from '../utils/repo-md-discovery';
+import type { LogService } from '../services/log-service';
 
 export interface SessionBranchAvailability {
   name: string;
@@ -34,6 +35,7 @@ export class WorkspaceService {
     credentialStore?: CredentialStore,
     repoManager?: RepoManager,
     sessionStore?: SessionStore,
+    private readonly logService?: LogService,
   ) {
     this.repoManager = repoManager ?? new RepoManager(db, settingsService);
     this.sessionStore = sessionStore ?? new SessionStore(db);
@@ -68,7 +70,7 @@ export class WorkspaceService {
     }
 
     this.mdFileManager.importDiscoveredRepoFiles(repo.id, discoverRepoMdFiles(repo.path));
-
+    this.logService?.logUserAction('add_repo', `Added repo "${repo.name}" at ${repo.path}`);
     return repo;
   }
 
@@ -88,6 +90,7 @@ export class WorkspaceService {
         this.repoManager.delete(id);
       }
       this.mdFileManager.deleteRepoFiles(id);
+      this.logService?.logUserAction('delete_repo', `Deleted repo "${repo.name}"`);
     });
   }
 
@@ -185,12 +188,18 @@ export class WorkspaceService {
             branchMode,
             initialBranchName,
           );
-          return this.toSessionView(
-            this.sessionStore.updateGitMetadata(session.id, { worktreePath: createdWorktreePath }),
-            repo,
+          const updated = this.sessionStore.updateGitMetadata(session.id, { worktreePath: createdWorktreePath });
+          this.logService?.logUserAction(
+            'create_session',
+            `Created session "${session.name}" (${input.agentType}) in repo "${repo.name}" on branch "${initialBranchName}"`,
           );
+          return this.toSessionView(updated, repo);
         }
 
+        this.logService?.logUserAction(
+          'create_session',
+          `Created session "${session.name}" (${input.agentType}) in repo "${repo.name}"`,
+        );
         return this.toSessionView(session, repo);
       } catch (error) {
         if (createdWorktreePath) {
@@ -219,6 +228,10 @@ export class WorkspaceService {
         await this.repoManager.removeSessionWorktree(repo, session.worktree_path);
       }
       this.sessionStore.delete(sessionId);
+      this.logService?.logUserAction(
+        'delete_session',
+        `Deleted session "${session.name}" from repo "${repo.name}"`,
+      );
     });
   }
 

@@ -38,10 +38,25 @@ import { automationRouter } from './routes/automation';
 import { TokenCounterService } from './services/token-counter-service';
 import { UsageService } from './services/usage-service';
 import { usageRouter } from './routes/usage';
+import { LogService } from './services/log-service';
+import { logsRouter } from './routes/logs';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const db = openDb(join(Config.DATA_DIR, 'app.db'));
 migrate(db);
+const logService = new LogService(db);
+
+// Capture unhandled errors before any other service initialises
+process.on('uncaughtException', (err: Error) => {
+  logService.logAppError(err.message, err.stack);
+  console.error('[FATAL] Uncaught exception', err);
+});
+process.on('unhandledRejection', (reason: unknown) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  logService.logAppError(err.message, err.stack);
+  console.error('[FATAL] Unhandled rejection', err);
+});
+
 const settingsService = new SettingsService();
 const notificationBus = new NotificationBus();
 const mdMgr = new MdFileManager(db);
@@ -55,7 +70,7 @@ const sessionStore = new SessionStore(db);
 const repoManager = new RepoManager(db, settingsService);
 const credentialStore = new CredentialStore(db);
 const mdRefService = new MdRefService(db);
-const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore);
+const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore, logService);
 const tokenCounter = new TokenCounterService();
 const usageService = new UsageService(db);
 void workspace.reconcileGitWorktrees().catch((error) => {
@@ -78,6 +93,7 @@ const app = new Hono();
 app.use('*', cors());
 
 app.onError((err, c) => {
+  logService.logAppError(err.message, err.stack);
   console.error('[ERROR]', err.message);
   return c.json({ error: err.message }, 500);
 });
@@ -91,12 +107,13 @@ app.get('/api/health', (c) =>
 app.route('/api/repos', reposRouter(workspace, mdRefService));
 app.route('/api/credentials', credentialsRouter(credentialStore));
 app.route('/api/agents', agentsRouter());
-app.route('/api/mdfiles', mdfilesRouter(mdMgr));
+app.route('/api/mdfiles', mdfilesRouter(mdMgr, logService));
 app.route('/api/settings', settingsRouter(settingsService));
 app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
 app.route('/api/tools', toolsRouter());
 app.route('/api/automation', automationRouter(automationService));
 app.route('/api/usage', usageRouter(usageService, repoManager));
+app.route('/api/logs', logsRouter(logService));
 
 // Static frontend (production only)
 if (Config.NODE_ENV === 'production') {

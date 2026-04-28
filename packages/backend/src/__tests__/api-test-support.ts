@@ -46,6 +46,7 @@ import { AutomationService } from '../services/automation-service';
 import { WorkspaceService } from '../application/workspace-service';
 import { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { createTokenUsageNode } from '../pipeline/nodes/token-usage.node';
+import { LogService } from '../services/log-service';
 
 export const testPaths = {
   root: TEST_DATA_DIR,
@@ -70,6 +71,7 @@ function makeTestApp() {
     // Test apps may not have any managed worktrees to reconcile.
   });
   const usageService = new UsageService(db);
+  const logService = new LogService(db);
   const pipelineRegistry = new PipelineRegistry(settingsService);
   const tokenCounter = new TokenCounterService();
   const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager);
@@ -81,7 +83,7 @@ function makeTestApp() {
   app.route('/api/repos', reposRouter(workspace, mdRefService));
   app.route('/api/credentials', credentialsRouter(credentialStore));
   app.route('/api/agents', agentsRouter());
-  app.route('/api/mdfiles', mdfilesRouter(mdMgr));
+  app.route('/api/mdfiles', mdfilesRouter(mdMgr, logService));
   app.route('/api/usage', usageRouter(usageService, repoManager));
   app.route('/api/settings', settingsRouter(settingsService));
   app.route('/api/pipeline', pipelineRouter(pipelineRegistry));

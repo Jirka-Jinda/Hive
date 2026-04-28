@@ -169,6 +169,21 @@ export interface AutomationTask {
   created_at: string;
 }
 
+export interface AppErrorLog {
+  id: number;
+  message: string;
+  stack: string | null;
+  context: string | null;
+  created_at: string;
+}
+
+export interface UserActionLog {
+  id: number;
+  action: string;
+  detail: string | null;
+  created_at: string;
+}
+
 // Helper
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
@@ -332,5 +347,10 @@ export const api = {
       const qs = params.toString();
       return request<UsageSummary>(`/usage${qs ? `?${qs}` : ''}`);
     },
+  },
+
+  logs: {
+    errors: () => request<AppErrorLog[]>('/logs/errors'),
+    actions: () => request<UserActionLog[]>('/logs/actions'),
   },
 };
