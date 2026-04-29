@@ -139,4 +139,101 @@ describe('useNotifications', () => {
 
     expect(useAppStore.getState().selectedMdFile).toBeNull();
   });
+
+  it('refreshes repo file list when a repo md change arrives for the selected repo', async () => {
+    resetAppStore({
+      mdFiles: [
+        {
+          id: 10,
+          scope: 'central',
+          repo_id: null,
+          path: 'existing.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+        {
+          id: 20,
+          scope: 'repo',
+          repo_id: 2,
+          path: 'repo-note.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+      ],
+      selectedRepo: { id: 2, name: 'my-repo', path: '/repos/my-repo', source: 'local', git_url: null, is_git_repo: false, created_at: '2026-04-27T00:00:00Z' },
+    });
+
+    apiMock.mdfiles.list.mockResolvedValue([
+      {
+        id: 20,
+        scope: 'repo',
+        repo_id: 2,
+        path: 'repo-note.md',
+        type: 'other',
+        created_at: '2026-04-27T00:00:00Z',
+        updated_at: '2026-04-27T00:00:00Z',
+      },
+      {
+        id: 21,
+        scope: 'repo',
+        repo_id: 2,
+        path: 'sessions/agent-notes.md',
+        type: 'instruction',
+        created_at: '2026-04-27T00:00:00Z',
+        updated_at: '2026-04-27T00:00:00Z',
+      },
+    ]);
+
+    render(<Harness />);
+
+    const ws = MockWebSocket.instances[0];
+    expect(ws).toBeDefined();
+
+    ws.emitMessage({ type: 'md-files-changed', scope: 'repo', repoId: 2 });
+
+    await waitFor(() => {
+      expect(apiMock.mdfiles.list).toHaveBeenCalledWith('repo', 2);
+    });
+
+    await waitFor(() => {
+      const files = useAppStore.getState().mdFiles;
+      expect(files).toHaveLength(3);
+      expect(files.some((f) => f.path === 'sessions/agent-notes.md')).toBe(true);
+    });
+  });
+
+  it('ignores repo md change when a different repo is selected', async () => {
+    resetAppStore({
+      mdFiles: [
+        {
+          id: 10,
+          scope: 'central',
+          repo_id: null,
+          path: 'existing.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+      ],
+      selectedRepo: { id: 99, name: 'other-repo', path: '/repos/other', source: 'local', git_url: null, is_git_repo: false, created_at: '2026-04-27T00:00:00Z' },
+    });
+
+    apiMock.mdfiles.list.mockResolvedValue([{ id: 21, scope: 'repo', repo_id: 2, path: 'new.md', type: 'other', created_at: '', updated_at: '' }]);
+
+    render(<Harness />);
+
+    const ws = MockWebSocket.instances[0];
+    ws.emitMessage({ type: 'md-files-changed', scope: 'repo', repoId: 2 });
+
+    await waitFor(() => {
+      expect(apiMock.mdfiles.list).toHaveBeenCalledWith('repo', 2);
+    });
+
+    // Store should not change since repo 2 is not selected
+    const files = useAppStore.getState().mdFiles;
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe('existing.md');
+  });
 });

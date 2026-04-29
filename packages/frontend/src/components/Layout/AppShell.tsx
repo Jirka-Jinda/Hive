@@ -98,7 +98,10 @@ export default function AppShell() {
     useEffect(() => {
         Promise.all([api.repos.list(), api.agents.list(), api.credentials.list(), api.mdfiles.list(), api.settings.get()])
             .then(([repos, agents, credentials, mdFiles, settings]) => {
-                setRepos(repos); setAgents(agents); setCredentials(credentials); setMdFiles(mdFiles); setSettings(settings);
+                setRepos(repos); setAgents(agents); setCredentials(credentials); setSettings(settings);
+                // Only load files belonging to the currently selected repo to prevent cross-repo pollution
+                const currentRepoId = useAppStore.getState().selectedRepo?.id ?? null;
+                setMdFiles(mdFiles.filter((f) => f.scope === 'central' || (currentRepoId !== null && f.repo_id === currentRepoId)));
             })
             .catch(console.error);
         api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
@@ -173,11 +176,26 @@ export default function AppShell() {
                 }
                 return;
             }
+            // Ctrl+3 — Git history, Ctrl+4 — Open in VS Code
+            if (event.key === '3' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                if (canShowGitHistory) {
+                    event.preventDefault();
+                    setShowGitHistory(true);
+                }
+                return;
+            }
+            if (event.key === '4' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                if (canOpenTargetInVsCode) {
+                    event.preventDefault();
+                    void openSelectedContextInVsCode();
+                }
+                return;
+            }
         };
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession, settings, lock]);
+    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession, settings, lock, canShowGitHistory, setShowGitHistory, canOpenTargetInVsCode, openSelectedContextInVsCode]);
 
     // ── Shared button class strings ───────────────────────────────────────────
     const iconBtnBase = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-all font-medium';
@@ -248,8 +266,8 @@ export default function AppShell() {
                                 onClick={() => setShowGitHistory(true)}
                                 title={canShowGitHistory
                                     ? selectedSession
-                                        ? `Git history for ${selectedSession.name}`
-                                        : `Git history for ${gitContextRepo?.name}`
+                                        ? `Git history for ${selectedSession.name} (Ctrl+3)`
+                                        : `Git history for ${gitContextRepo?.name} (Ctrl+3)`
                                     : 'Select a git repository to view history'}
                                 className={`${iconBtnBase} ${canShowGitHistory
                                     ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
@@ -268,8 +286,8 @@ export default function AppShell() {
                                 <button
                                     onClick={() => void openSelectedContextInVsCode()}
                                     title={selectedSession
-                                        ? `Open ${selectedSession.name} worktree in VS Code`
-                                        : `Open ${gitContextRepo.name} in VS Code`}
+                                        ? `Open ${selectedSession.name} worktree in VS Code (Ctrl+4)`
+                                        : `Open ${gitContextRepo.name} in VS Code (Ctrl+4)`}
                                     className={iconBtnDefault}
                                 >
                                     <img src="/visual-studio.png" alt="" className="w-4 h-4 object-contain" />

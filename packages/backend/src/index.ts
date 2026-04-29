@@ -144,6 +144,19 @@ setupWebSocketServer(termWss, sessionStore, repoManager, credentialStore, pipeli
 setupShellServer(shellWss);
 setupNotifyServer(notifyWss, notificationBus);
 
+// Re-discover repo md files whenever an agent session goes idle so that any
+// md files created by the agent in its worktree appear in the right panel.
+notificationBus.onSessionState((event) => {
+  if (event.state !== 'idle') return;
+  try {
+    const session = sessionStore.get(event.sessionId);
+    workspace.rediscoverRepoMdFiles(session.repo_id);
+    notificationBus.emitMdFilesChanged({ scope: 'repo', repoId: session.repo_id });
+  } catch (e) {
+    console.warn('[Hive] Failed to re-discover repo md files after session idle:', e);
+  }
+});
+
 server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
   const pathname = new URL(req.url ?? '', 'http://localhost').pathname;
   if (pathname === '/ws/terminal') {

@@ -71,7 +71,7 @@ function ActionButton({
 }
 
 export default function RepoList() {
-    const { repos, selectedRepo, setRepos, setSelectedRepo, updateRepo, setSessions, setMdFiles, mdFiles } =
+    const { repos, selectedRepo, setRepos, setSelectedRepo, updateRepo, setSessions, setSelectedSession, setMdFiles, mdFiles } =
         useAppStore();
     const [showAdd, setShowAdd] = useState(false);
     const [isGit, setIsGit] = useState(false);
@@ -123,6 +123,14 @@ export default function RepoList() {
         setSessions(sessions);
         setMdFiles([...centralFiles, ...repoMdFiles]);
         setRepoRefs(refs);
+        // Auto-activate the top session (idle first, then working, then stopped)
+        if (sessions.length > 0) {
+            const order: Record<string, number> = { idle: 0, working: 1, stopped: 2 };
+            const top = [...sessions].sort(
+                (a, b) => (order[a.state ?? 'stopped'] ?? 2) - (order[b.state ?? 'stopped'] ?? 2)
+            )[0];
+            setSelectedSession(top);
+        }
     };
 
     const addRepo = async () => {
@@ -358,7 +366,15 @@ export default function RepoList() {
                     return (
                         <li
                             key={repo.id}
-                            onClick={() => !isPendingRemove && selectRepo(repo)}
+                            onClick={() => {
+                                if (isPendingRemove || isEditing) return;
+                                if (isActive) {
+                                    setSelectedRepo(null);
+                                    setRepoRefs([]);
+                                } else {
+                                    void selectRepo(repo);
+                                }
+                            }}
                             className={`group rounded-lg border cursor-pointer text-sm ${isActive
                                 ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
                                 : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'

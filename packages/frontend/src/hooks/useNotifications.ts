@@ -33,7 +33,8 @@ export function useNotifications(): void {
             sessionId: number;
             sessionName?: string;
             state: 'working' | 'idle' | 'stopped';
-            scope?: 'central';
+            scope?: 'central' | 'repo';
+            repoId?: number;
           };
           if (msg.type === 'session-state') {
             updateSessionState(msg.sessionId, msg.state, msg.sessionName ?? '');
@@ -54,6 +55,25 @@ export function useNotifications(): void {
               }
             }).catch(() => {
               // Ignore transient refresh failures and keep retrying via WS lifecycle.
+            });
+          }
+
+          if (msg.type === 'md-files-changed' && msg.scope === 'repo' && msg.repoId !== undefined) {
+            const repoId = msg.repoId;
+            void api.mdfiles.list('repo', repoId).then((freshRepoFiles) => {
+              const { mdFiles, selectedMdFile, selectedRepo } = useAppStore.getState();
+              if (selectedRepo?.id !== repoId) return;
+              const centralFiles = mdFiles.filter((file) => file.scope === 'central');
+              setMdFiles([...centralFiles, ...freshRepoFiles]);
+
+              if (
+                selectedMdFile?.scope === 'repo' &&
+                !freshRepoFiles.some((file) => file.id === selectedMdFile.id)
+              ) {
+                setSelectedMdFile(null);
+              }
+            }).catch(() => {
+              // Ignore transient refresh failures.
             });
           }
         } catch {

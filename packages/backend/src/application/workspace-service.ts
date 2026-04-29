@@ -74,6 +74,27 @@ export class WorkspaceService {
     return repo;
   }
 
+  /**
+   * Re-discovers md files on disk for the given repo (including all session
+   * worktree paths) and imports any new/changed files into the DB.
+   */
+  rediscoverRepoMdFiles(repoId: number): void {
+    const repo = this.repoManager.get(repoId);
+    const sessions = this.sessionStore.list(repoId);
+
+    const paths = new Set<string>([repo.path]);
+    for (const session of sessions) {
+      if (session.worktree_path) paths.add(session.worktree_path);
+    }
+
+    for (const scanPath of paths) {
+      const discovered = discoverRepoMdFiles(scanPath);
+      if (discovered.length > 0) {
+        this.mdFileManager.importDiscoveredRepoFiles(repoId, discovered);
+      }
+    }
+  }
+
   deleteRepo(id: number, deleteFromDisk = false): Promise<void> {
     return this.withRepoLock(id, async () => {
       const repo = this.repoManager.get(id);

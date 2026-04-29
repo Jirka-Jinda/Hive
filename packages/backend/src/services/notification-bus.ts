@@ -9,7 +9,8 @@ export interface SessionStateEvent {
 }
 
 export interface MdFilesChangedEvent {
-  scope: 'central';
+  scope: 'central' | 'repo';
+  repoId?: number;
 }
 
 export class NotificationBus extends EventEmitter {

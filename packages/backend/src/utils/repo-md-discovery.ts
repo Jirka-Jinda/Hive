@@ -138,7 +138,10 @@ function walkRepo(
       if (SKIP_DIRS.has(lowerName)) continue;
 
       const nextIncludeAllMarkdown = includeAllMarkdown || FULL_INCLUDE_DIRS.has(lowerName);
-      const shouldDescend = nextIncludeAllMarkdown || TRACKED_DIRS.has(lowerName) || HINT_DIR_RE.test(lowerName);
+      // Always recurse one level deep from the root so files in any top-level
+      // directory (e.g. docs/, sessions/) are discovered. Deeper levels use the
+      // tracked-dir / keyword heuristic to avoid scanning unrelated trees.
+      const shouldDescend = nextIncludeAllMarkdown || depth === 0 || TRACKED_DIRS.has(lowerName) || HINT_DIR_RE.test(lowerName);
       if (!shouldDescend) continue;
 
       walkRepo(repoPath, nextRelative, depth + 1, nextIncludeAllMarkdown, results, seen);
