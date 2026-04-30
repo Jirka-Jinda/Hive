@@ -247,7 +247,9 @@ async function startBackend(): Promise<number> {
     ? path.join(__dirname, '..', '..', '..', 'packages', 'frontend', 'dist')
     : path.join(__dirname, '..', 'public');
 
-  const dataDir = path.join(app.getPath('userData'), 'data');
+  const dataDir = isDev
+    ? path.join(app.getPath('userData'), 'data')
+    : path.join(path.dirname(app.getPath('exe')), 'data');
   fs.mkdirSync(dataDir, { recursive: true });
 
   backend = utilityProcess.fork(backendEntry, [], {
