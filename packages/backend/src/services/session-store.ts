@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export type SessionBranchMode = 'new' | 'existing';
+export type SessionBranchMode = 'new' | 'existing' | 'root';
 
 export interface Session {
   id: number;

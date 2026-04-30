@@ -71,6 +71,8 @@ export interface Repo {
   is_git_repo: boolean;
 }
 
+export type SessionBranchMode = 'new' | 'existing' | 'root';
+
 export interface Session {
   id: number;
   repo_id: number;
@@ -79,7 +81,7 @@ export interface Session {
   name: string;
   status: 'running' | 'stopped';
   state: 'working' | 'idle' | 'stopped';
-  branch_mode?: 'new' | 'existing' | null;
+  branch_mode?: SessionBranchMode | null;
   initial_branch_name?: string | null;
   worktree_path?: string | null;
   current_branch?: string | null;
@@ -139,6 +141,11 @@ export interface MdFile {
   type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
   created_at: string;
   updated_at: string;
+}
+
+export interface SessionAgentFile {
+  agentRelativePath: string;
+  repoRelativePath: string;
 }
 
 export interface MdFileUpdateBody {
@@ -210,7 +217,7 @@ export const api = {
 
     sessions: {
       list: (repoId: number) => request<Session[]>(`/repos/${repoId}/sessions`),
-      create: (repoId: number, body: { name: string; agentType: string; credentialId?: number; branchMode?: 'new' | 'existing'; branchName?: string }) =>
+      create: (repoId: number, body: { name: string; agentType: string; credentialId?: number; branchMode?: SessionBranchMode; branchName?: string }) =>
         request<Session>(`/repos/${repoId}/sessions`, { method: 'POST', body: JSON.stringify(body) }),
       update: (repoId: number, sid: number, body: { name: string }) =>
         request<Session>(`/repos/${repoId}/sessions/${sid}`, { method: 'PUT', body: JSON.stringify(body) }),
@@ -218,6 +225,16 @@ export const api = {
         request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}`, { method: 'DELETE' }),
       restart: (repoId: number, sid: number) =>
         request<Session>(`/repos/${repoId}/sessions/${sid}/restart`, { method: 'POST' }),
+
+      agentFiles: {
+        list: (repoId: number, sid: number) =>
+          request<SessionAgentFile[]>(`/repos/${repoId}/sessions/${sid}/agent-files`),
+        promote: (repoId: number, sid: number, agentRelativePath: string) =>
+          request<MdFile>(`/repos/${repoId}/sessions/${sid}/agent-files/promote`, {
+            method: 'POST',
+            body: JSON.stringify({ agentRelativePath }),
+          }),
+      },
 
       mdRefs: {
         get: (repoId: number, sid: number) =>

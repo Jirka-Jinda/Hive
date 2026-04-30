@@ -25,7 +25,7 @@ import { existsSync } from 'node:fs';
 import * as pty from 'node-pty';
 
 import { resolveCommand, AGENT_ADAPTERS } from '../services/agents';
-import { spawnAgent } from '../services/process-manager';
+import { killProcessAndWait, spawnAgent } from '../services/process-manager';
 
 const mockExecSync = vi.mocked(execSync);
 const mockSpawnSync = vi.mocked(spawnSync);
@@ -221,6 +221,30 @@ describe('spawnAgent – Windows cmd wrapping', () => {
       [],
       expect.objectContaining({ cwd: '/repo/worktrees/session-1' })
     );
+  });
+
+  it('waits for the real PTY exit when killing a process for cleanup', async () => {
+    setPlatform('linux');
+    mockExecSync.mockReturnValue('/usr/local/bin/codex\n');
+    mockExistsSync.mockReturnValue(true);
+
+    let exitHandler: ((event: { exitCode: number }) => void) | undefined;
+    const kill = vi.fn(() => {
+      setTimeout(() => exitHandler?.({ exitCode: 0 }), 5);
+    });
+    mockPtySpawn.mockReturnValue({
+      onData: vi.fn(),
+      onExit: vi.fn((handler: (event: { exitCode: number }) => void) => {
+        exitHandler = handler;
+      }),
+      kill,
+    } as unknown as ReturnType<typeof pty.spawn>);
+
+    const sessionId = freshId();
+    spawnAgent(sessionId, AGENT_ADAPTERS['codex'], '/repo/worktrees/session-1');
+    await killProcessAndWait(sessionId, 1000);
+
+    expect(kill).toHaveBeenCalledTimes(1);
   });
 });
 

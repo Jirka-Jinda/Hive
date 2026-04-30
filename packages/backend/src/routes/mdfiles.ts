@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import type { MdFile, MdFileManager } from '../services/mdfile-manager';
+import type { WorkspaceService } from '../application/workspace-service';
 import { parseFrontmatter, renderTemplate } from '../utils/template';
 import { jsonRoute, parseIdParam } from './route-utils';
 import { getErrorMessage } from '../utils/errors';
 import type { LogService } from '../services/log-service';
 
-export function mdfilesRouter(mdMgr: MdFileManager, logService: LogService): Hono {
+export function mdfilesRouter(mdMgr: MdFileManager, workspace: WorkspaceService, logService: LogService): Hono {
   const app = new Hono();
 
   app.get('/', (c) => {
@@ -30,6 +31,9 @@ export function mdfilesRouter(mdMgr: MdFileManager, logService: LogService): Hon
         'create_md_file',
         `Created "${body.filename}" (${body.type ?? 'other'}) in ${body.scope}${body.repoPath ? ` at ${body.repoPath}` : ''}`,
       );
+      if (file.scope === 'repo' && file.repo_id !== null) {
+        void workspace.syncRepoFilesToAllWorktrees(file.repo_id);
+      }
       return file;
     }, {
       successStatus: 201,
@@ -52,7 +56,11 @@ export function mdfilesRouter(mdMgr: MdFileManager, logService: LogService): Hon
         filename?: string;
         type?: MdFile['type'];
       }>();
-      return c.json(mdMgr.update(id, body));
+      const updated = mdMgr.update(id, body);
+      if (updated.scope === 'repo' && updated.repo_id !== null) {
+        void workspace.syncRepoFilesToAllWorktrees(updated.repo_id);
+      }
+      return c.json(updated);
     } catch (error: unknown) {
       const message = getErrorMessage(error);
       return c.json({ error: message }, /not found/i.test(message) ? 404 : 400);
@@ -64,6 +72,9 @@ export function mdfilesRouter(mdMgr: MdFileManager, logService: LogService): Hon
     const { file } = mdMgr.read(id);
     mdMgr.delete(id);
     logService.logUserAction('delete_md_file', `Deleted "${file.path}"`);
+    if (file.scope === 'repo' && file.repo_id !== null) {
+      workspace.deleteRepoFileFromAllWorktrees(file.repo_id, file.path);
+    }
     return { ok: true };
   }, { errorStatus: 404 }));
 

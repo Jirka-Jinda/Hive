@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import simpleGit from 'simple-git';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -36,6 +36,11 @@ describe('Git-backed session APIs', () => {
     id: number;
     worktree_path: string;
   };
+  let rootSession: {
+    id: number;
+    worktree_path: string | null;
+  } = { id: 0, worktree_path: null };
+  const repoSeedContent = '# Session seed\n\nUse this in the worktree.\n';
 
   beforeAll(async () => {
     await initGitRepo(repoPath);
@@ -45,6 +50,18 @@ describe('Git-backed session APIs', () => {
     });
     expect(res.status).toBe(201);
     repoId = (await res.json()).id;
+
+    const mdRes = await req(getApp(), '/api/mdfiles', {
+      method: 'POST',
+      body: {
+        scope: 'repo',
+        repoPath,
+        filename: 'session-seed.md',
+        content: repoSeedContent,
+        type: 'prompt',
+      },
+    });
+    expect(mdRes.status).toBe(201);
   });
 
   it('lists local branches with root-worktree occupancy', async () => {
@@ -87,6 +104,7 @@ describe('Git-backed session APIs', () => {
     expect(existsSync(newBranchBody.worktree_path)).toBe(true);
     expect(newBranchBody.worktree_path.replace(/\\/g, '/')).toContain('/wt/');
     expect(basename(newBranchBody.worktree_path)).toBe(String(newBranchBody.id));
+    expect(readFileSync(join(newBranchBody.worktree_path, '.agent', 'session-seed.md'), 'utf8')).toBe(repoSeedContent);
     newBranchSession = newBranchBody;
 
     const createExistingBranch = await req(getApp(), `/api/repos/${repoId}/sessions`, {
@@ -106,6 +124,34 @@ describe('Git-backed session APIs', () => {
     expect(existingBranchBody.worktree_path).not.toBe(newBranchBody.worktree_path);
     expect(existsSync(existingBranchBody.worktree_path)).toBe(true);
     existingBranchSession = existingBranchBody;
+  });
+
+  it('creates repo-root git sessions without allocating a worktree', async () => {
+    const createRootSession = await req(getApp(), `/api/repos/${repoId}/sessions`, {
+      method: 'POST',
+      body: {
+        name: 'Repo Root Session',
+        agentType: 'claude',
+        branchMode: 'root',
+      },
+    });
+    expect(createRootSession.status).toBe(201);
+    const rootBody = await createRootSession.json();
+    expect(rootBody.branch_mode).toBe('root');
+    expect(rootBody.initial_branch_name).toBeNull();
+    expect(rootBody.worktree_path).toBeNull();
+    expect(rootBody.current_branch).toBe('main');
+    rootSession = rootBody;
+
+    const statusRes = await req(getApp(), `/api/repos/${repoId}/git/status?sessionId=${rootBody.id}`);
+    expect(statusRes.status).toBe(200);
+    expect(await statusRes.json()).toEqual(
+      expect.objectContaining({
+        branch: 'main',
+        worktree_path: repoPath,
+        repo_path: repoPath,
+      }),
+    );
   });
 
   it('marks attached branches as in use by the owning session', async () => {
@@ -164,6 +210,7 @@ describe('Git-backed session APIs', () => {
     expect(res.status).toBe(200);
     expect(existsSync(newBranchSession.worktree_path)).toBe(false);
     expect(existsSync(existingBranchSession.worktree_path)).toBe(true);
+    expect(rootSession.worktree_path).toBeNull();
 
     const branchesRes = await req(getApp(), `/api/repos/${repoId}/git/branches?q=session-one`);
     expect(branchesRes.status).toBe(200);

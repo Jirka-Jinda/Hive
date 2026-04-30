@@ -1,6 +1,6 @@
 {
     "name": "@aw/electron",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Electron wrapper for Hive",
     "author": "Hive",
     "main": "dist/main.js",

@@ -8,9 +8,26 @@ export interface ProcessEntry {
   sessionId: number;
   workingDirectory: string;
   events: EventEmitter;
+  exitPromise: Promise<number>;
 }
 
 const processes = new Map<number, ProcessEntry>();
+
+function waitFor<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
+}
 
 export function spawnAgent(
   sessionId: number,
@@ -48,11 +65,16 @@ export function spawnAgent(
   });
 
   const events = new EventEmitter();
-  const entry: ProcessEntry = { pty: proc, sessionId, workingDirectory, events };
+  let resolveExit: (exitCode: number) => void = () => {};
+  const exitPromise = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  const entry: ProcessEntry = { pty: proc, sessionId, workingDirectory, events, exitPromise };
   processes.set(sessionId, entry);
 
   proc.onData((data: string) => events.emit('data', Buffer.from(data)));
   proc.onExit(({ exitCode }: { exitCode: number }) => {
+    resolveExit(exitCode);
     events.emit('exit', exitCode);
     processes.delete(sessionId);
   });
@@ -79,6 +101,15 @@ export function killProcess(sessionId: number): void {
     entry.events.removeAllListeners();
     try { entry.pty.kill(); } catch { /* already dead */ }
   }
+}
+
+export async function killProcessAndWait(sessionId: number, timeoutMs = 2500): Promise<void> {
+  const entry = processes.get(sessionId);
+  if (!entry) return;
+
+  const exitPromise = entry.exitPromise;
+  killProcess(sessionId);
+  await waitFor(exitPromise, timeoutMs);
 }
 
 export function resizeProcess(sessionId: number, cols: number, rows: number): void {

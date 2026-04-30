@@ -41,7 +41,7 @@ describe('WorkspaceService git session cleanup', () => {
 
     const workspace = new WorkspaceService(
       {} as any,
-      {} as any,
+      { list: vi.fn(() => []) } as any,
       {} as any,
       { get: vi.fn() } as any,
       repoManager,

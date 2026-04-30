@@ -40,6 +40,7 @@ import { UsageService } from './services/usage-service';
 import { usageRouter } from './routes/usage';
 import { LogService } from './services/log-service';
 import { logsRouter } from './routes/logs';
+import { RepoAgentMdWatcher } from './services/repo-agent-md-watcher';
 
 // ── Bootstrap ──────────────────────────────────────────────────────────────
 const db = openDb(join(Config.DATA_DIR, 'app.db'));
@@ -73,9 +74,15 @@ const mdRefService = new MdRefService(db);
 const workspace = new WorkspaceService(db, mdMgr, settingsService, credentialStore, repoManager, sessionStore, logService);
 const tokenCounter = new TokenCounterService();
 const usageService = new UsageService(db);
-void workspace.reconcileGitWorktrees().catch((error) => {
-  console.error('[WARN] Failed to reconcile managed git worktrees on startup', error);
-});
+const repoAgentMdWatcher = new RepoAgentMdWatcher(workspace, notificationBus);
+workspace.setAgentMdWatchRootsChangedHandler(() => repoAgentMdWatcher.refreshWatchedRoots());
+void workspace.reconcileGitWorktrees()
+  .catch((error) => {
+    console.error('[WARN] Failed to reconcile managed git worktrees on startup', error);
+  })
+  .finally(() => {
+    repoAgentMdWatcher.startWatching();
+  });
 
 // ── Pipeline ───────────────────────────────────────────────────────────────
 const pipelineRegistry = new PipelineRegistry(settingsService);
@@ -107,7 +114,7 @@ app.get('/api/health', (c) =>
 app.route('/api/repos', reposRouter(workspace, mdRefService));
 app.route('/api/credentials', credentialsRouter(credentialStore));
 app.route('/api/agents', agentsRouter());
-app.route('/api/mdfiles', mdfilesRouter(mdMgr, logService));
+app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));
 app.route('/api/settings', settingsRouter(settingsService));
 app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
 app.route('/api/tools', toolsRouter());

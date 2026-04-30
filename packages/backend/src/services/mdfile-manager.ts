@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { CentralMdSyncService } from './central-md-sync';
 import type { DiscoveredRepoMdFile } from '../utils/repo-md-discovery';
+import { AGENT_MD_DIR } from '../utils/agent-md-files';
 
 export interface MdFile {
   id: number;
@@ -45,6 +46,11 @@ function normalizeRepoStoredPath(path: string): string {
     throw new Error('Invalid repo file path');
   }
   return normalized;
+}
+
+function stripAgentPrefix(path: string): string | null {
+  const prefix = `${AGENT_MD_DIR}/`;
+  return path.toLowerCase().startsWith(prefix) ? path.slice(prefix.length) : null;
 }
 
 type MdFileRow = MdFile & { content: string };
@@ -112,6 +118,25 @@ export class MdFileManager {
     return this.db
       .prepare('SELECT id,scope,repo_id,path,type,created_at,updated_at FROM md_files WHERE id = ?')
       .get(result.lastInsertRowid as number) as MdFile;
+  }
+
+  private persistDiscoveredRepoFile(repoId: number, path: string, content: string, type: MdFile['type']): MdFile {
+    const normalizedPath = normalizeRepoStoredPath(path);
+    const agentAlias = stripAgentPrefix(normalizedPath);
+    const existing =
+      this.findByScopePath('repo', normalizedPath, repoId) ??
+      (agentAlias ? this.findByScopePath('repo', agentAlias, repoId) : undefined);
+
+    if (existing) {
+      this.db
+        .prepare("UPDATE md_files SET content = ?, type = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(content, type, existing.id);
+      return this.db
+        .prepare('SELECT id,scope,repo_id,path,type,created_at,updated_at FROM md_files WHERE id = ?')
+        .get(existing.id) as MdFile;
+    }
+
+    return this.persist('repo', repoId, normalizedPath, content, type);
   }
 
   list(scope?: string, repoId?: number): MdFile[] {
@@ -215,10 +240,25 @@ export class MdFileManager {
 
   importDiscoveredRepoFiles(repoId: number, files: readonly DiscoveredRepoMdFile[]): MdFile[] {
     const importFiles = this.db.transaction((rows: readonly DiscoveredRepoMdFile[]) => {
-      return rows.map((row) => this.persist('repo', repoId, normalizeRepoStoredPath(row.path), row.content, row.type));
+      return rows.map((row) => this.persistDiscoveredRepoFile(repoId, row.path, row.content, row.type));
     });
 
     return importFiles(files);
+  }
+
+  pruneMissingRepoAgentFiles(repoId: number, currentAgentPaths: ReadonlySet<string>): boolean {
+    const rows = this.db
+      .prepare("SELECT id,path FROM md_files WHERE scope = 'repo' AND repo_id = ? AND path LIKE ?")
+      .all(repoId, `${AGENT_MD_DIR}/%`) as { id: number; path: string }[];
+    const missing = rows.filter((row) => !currentAgentPaths.has(normalizeRepoStoredPath(row.path)));
+    if (missing.length === 0) return false;
+
+    const remove = this.db.transaction((ids: readonly number[]) => {
+      const stmt = this.db.prepare('DELETE FROM md_files WHERE id = ?');
+      for (const id of ids) stmt.run(id);
+    });
+    remove(missing.map((row) => row.id));
+    return true;
   }
 
   deleteRepoFiles(repoId: number): void {

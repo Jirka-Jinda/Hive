@@ -94,7 +94,7 @@ describe('GitHistoryModal', () => {
         expect(screen.getByText('Initial commit')).toBeInTheDocument();
 
         await user.click(screen.getByRole('button', { name: 'Refresh' }));
-        await user.click(screen.getByRole('button', { name: 'Close' }));
+        await user.click(screen.getByRole('button', { name: 'Close (Esc)' }));
 
         expect(apiMock.repos.git.history).toHaveBeenCalledTimes(2);
         expect(onClose).toHaveBeenCalledTimes(1);

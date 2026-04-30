@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
-import type { MdFile } from '../../api/client';
+import type { MdFile, SessionAgentFile } from '../../api/client';
 
 interface Props {
     onCollapse: () => void;
@@ -62,7 +62,7 @@ function ActionButton({
 }
 
 export default function MdFilePanel({ onCollapse }: Props) {
-    const { mdFiles, setMdFiles, selectedRepo, setSelectedMdFile, selectedMdFile } = useAppStore();
+    const { mdFiles, setMdFiles, selectedRepo, setSelectedMdFile, selectedMdFile, selectedSession } = useAppStore();
     const [createForScope, setCreateForScope] = useState<'central' | 'repo' | null>(null);
     const [newName, setNewName] = useState('');
     const [newType, setNewType] = useState<MdFile['type']>('other');
@@ -79,6 +79,15 @@ export default function MdFilePanel({ onCollapse }: Props) {
     const [editingFileId, setEditingFileId] = useState<number | null>(null);
     const [editingFileName, setEditingFileName] = useState('');
     const [renamingFileId, setRenamingFileId] = useState<number | null>(null);
+    // Collapsed state for each section (all open by default)
+    const [centralCollapsed, setCentralCollapsed] = useState(false);
+    const [repoCollapsed, setRepoCollapsed] = useState(false);
+    const [promptsCollapsed, setPromptsCollapsed] = useState(false);
+    const [sessionCollapsed, setSessionCollapsed] = useState(false);
+    // Session agent files (worktree-only, not yet promoted to repo)
+    const [sessionAgentFiles, setSessionAgentFiles] = useState<SessionAgentFile[]>([]);
+    const [promotingFile, setPromotingFile] = useState<string | null>(null);
+    const [sessionFilesError, setSessionFilesError] = useState('');
 
     const centralFiles = sortByType(mdFiles.filter((f) => f.scope === 'central'));
     const centralNonPromptFiles = centralFiles.filter((f) => f.type !== 'prompt');
@@ -88,6 +97,35 @@ export default function MdFilePanel({ onCollapse }: Props) {
     useEffect(() => {
         if (!selectedRepo && createForScope === 'repo') setCreateForScope(null);
     }, [createForScope, selectedRepo]);
+
+    useEffect(() => {
+        if (!selectedSession?.worktree_path || !selectedRepo) {
+            setSessionAgentFiles([]);
+            return;
+        }
+        api.repos.sessions.agentFiles.list(selectedRepo.id, selectedSession.id)
+            .then(setSessionAgentFiles)
+            .catch(() => setSessionAgentFiles([]));
+    }, [selectedSession?.id, selectedRepo?.id, mdFiles]);
+
+    const promoteFile = async (agentRelativePath: string) => {
+        if (!selectedRepo || !selectedSession) return;
+        setPromotingFile(agentRelativePath);
+        setSessionFilesError('');
+        try {
+            await api.repos.sessions.agentFiles.promote(
+                selectedRepo.id, selectedSession.id, agentRelativePath,
+            );
+            const freshRepoFiles = await api.mdfiles.list('repo', selectedRepo.id);
+            const { mdFiles: current } = useAppStore.getState();
+            const centralFiles = current.filter((f) => f.scope === 'central');
+            setMdFiles([...centralFiles, ...freshRepoFiles]);
+        } catch (e: unknown) {
+            setSessionFilesError(e instanceof Error ? e.message : 'Failed to promote file');
+        } finally {
+            setPromotingFile(null);
+        }
+    };
 
     const cancelEditingFile = () => {
         setEditingFileId(null);
@@ -376,7 +414,7 @@ Repo: {{repo}}  \nSession: {{session}}
     };
 
     // Called as a plain function (not a React component) to avoid remount on each render
-    const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo') => {
+    const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo', collapsed: boolean, setCollapsed: (v: boolean) => void) => {
         const isCreating = createForScope === scope;
         const isDragOver = dragOverScope === scope;
         return (
@@ -388,60 +426,72 @@ Repo: {{repo}}  \nSession: {{session}}
                 onDrop={(e) => handleDrop(e, scope)}
             >
                 <div className="flex items-center justify-between gap-2 px-2 mb-1">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
-                        {label}
-                    </div>
                     <button
-                        onClick={() => { if (isCreating) { setCreateForScope(null); setDropContent(null); } else { startCreate(scope); } }}
-                        className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${isCreating
-                            ? 'bg-orange-600 border-orange-500 text-white'
-                            : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
-                            }`}
+                        onClick={() => setCollapsed(!collapsed)}
+                        className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-gray-300 transition-colors"
                     >
-                        {isCreating ? '\u2715' : '+ Add'}
+                        <svg className={`w-3 h-3 transition-transform ${collapsed ? '-rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                        {label}
                     </button>
+                    {!collapsed && (
+                        <button
+                            onClick={() => { if (isCreating) { setCreateForScope(null); setDropContent(null); } else { startCreate(scope); } }}
+                            className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${isCreating
+                                ? 'bg-orange-600 border-orange-500 text-white'
+                                : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
+                                }`}
+                        >
+                            {isCreating ? '\u2715' : '+ Add'}
+                        </button>
+                    )}
                 </div>
 
-                {isCreating && (
-                    <div className="mx-2 mb-2 p-2 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-1.5">
-                        <input
-                            className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
-                            placeholder="filename.md"
-                            value={newName}
-                            onChange={(e) => setNewName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && createFile()}
-                            autoFocus
-                        />
-                        <select
-                            className="w-full bg-gray-900 border border-gray-700 text-xs px-1.5 py-1 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all"
-                            value={newType}
-                            onChange={(e) => setNewType(e.target.value as MdFile['type'])}
-                        >
-                            <option value="skill">Skill</option>
-                            <option value="tool">Tool</option>
-                            <option value="instruction">Instruction</option>
-                            <option value="prompt">Prompt Template</option>
-                            <option value="other">Other</option>
-                        </select>
-                        <button
-                            onClick={createFile}
-                            disabled={creating || (scope === 'repo' && !selectedRepo)}
-                            className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            {creating ? 'Creating\u2026' : 'Create File'}
-                        </button>
-                        {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}
-                    </div>
-                )}
+                {!collapsed && (
+                    <>
+                        {isCreating && (
+                            <div className="mx-2 mb-2 p-2 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-1.5">
+                                <input
+                                    className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                    placeholder="filename.md"
+                                    value={newName}
+                                    onChange={(e) => setNewName(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && createFile()}
+                                    autoFocus
+                                />
+                                <select
+                                    className="w-full bg-gray-900 border border-gray-700 text-xs px-1.5 py-1 rounded-md text-gray-100 focus:outline-none focus:border-orange-500 transition-all"
+                                    value={newType}
+                                    onChange={(e) => setNewType(e.target.value as MdFile['type'])}
+                                >
+                                    <option value="skill">Skill</option>
+                                    <option value="tool">Tool</option>
+                                    <option value="instruction">Instruction</option>
+                                    <option value="prompt">Prompt Template</option>
+                                    <option value="other">Other</option>
+                                </select>
+                                <button
+                                    onClick={createFile}
+                                    disabled={creating || (scope === 'repo' && !selectedRepo)}
+                                    className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    {creating ? 'Creating\u2026' : 'Create File'}
+                                </button>
+                                {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}
+                            </div>
+                        )}
 
-                {files.length === 0 && !isDragOver ? (
-                    <div className="text-xs text-gray-600 px-2 py-1 italic">Empty — drop a .md file here</div>
-                ) : isDragOver ? (
-                    <div className="text-xs text-orange-400 px-2 py-2 text-center border border-dashed border-orange-500/60 rounded-md mx-1 mb-1">
-                        Drop to import .md file
-                    </div>
-                ) : (
-                    files.map(renderFileItem)
+                        {files.length === 0 && !isDragOver ? (
+                            <div className="text-xs text-gray-600 px-2 py-1 italic">Empty — drop a .md file here</div>
+                        ) : isDragOver ? (
+                            <div className="text-xs text-orange-400 px-2 py-2 text-center border border-dashed border-orange-500/60 rounded-md mx-1 mb-1">
+                                Drop to import .md file
+                            </div>
+                        ) : (
+                            files.map(renderFileItem)
+                        )}
+                    </>
                 )}
             </div>
         );
@@ -461,43 +511,107 @@ Repo: {{repo}}  \nSession: {{session}}
             </div>
 
             <div className="flex-1 p-2 overflow-y-auto">
-                {renderSection(centralNonPromptFiles, 'Central', 'central')}
-                {selectedRepo && renderSection(repoFiles, `Repo: ${selectedRepo.name}`, 'repo')}
+                {renderSection(centralNonPromptFiles, 'Central', 'central', centralCollapsed, setCentralCollapsed)}
+                {selectedRepo && renderSection(repoFiles, `Repo: ${selectedRepo.name}`, 'repo', repoCollapsed, setRepoCollapsed)}
+
+                {/* ── Session Files section ────────────────────────── */}
+                {selectedSession?.worktree_path && (
+                    <div className="mb-3">
+                        <div className="flex items-center justify-between gap-2 px-2 mb-1">
+                            <button
+                                onClick={() => setSessionCollapsed(!sessionCollapsed)}
+                                className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-gray-300 transition-colors"
+                            >
+                                <svg className={`w-3 h-3 transition-transform ${sessionCollapsed ? '-rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                                </svg>
+                                Session: {selectedSession.name}
+                            </button>
+                        </div>
+                        {!sessionCollapsed && (
+                            <>
+                                {sessionAgentFiles.length === 0 ? (
+                                    <p className="text-xs text-gray-600 px-2 py-1 italic">No session files yet</p>
+                                ) : (
+                                    <div className="space-y-0.5">
+                                        {sessionAgentFiles.map((f) => {
+                                            const filename = f.agentRelativePath.split('/').pop() ?? f.agentRelativePath;
+                                            const isPromoting = promotingFile === f.agentRelativePath;
+                                            return (
+                                                <div
+                                                    key={f.agentRelativePath}
+                                                    className="flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 hover:bg-gray-900/70"
+                                                >
+                                                    <span className="text-xs text-gray-300 truncate" title={f.repoRelativePath}>
+                                                        📄 {filename}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => void promoteFile(f.agentRelativePath)}
+                                                        disabled={isPromoting}
+                                                        title="Promote to repo"
+                                                        className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-orange-600/50 bg-orange-600/15 text-orange-300 hover:bg-orange-600/30 hover:text-orange-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                        {isPromoting ? '…' : '↑ Repo'}
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                {sessionFilesError && (
+                                    <p className="px-2 mt-1 text-[10px] text-red-400">{sessionFilesError}</p>
+                                )}
+                            </>
+                        )}
+                    </div>
+                )}
 
                 {/* ── Prompt Templates section ─────────────────────── */}
                 <div className="mt-1 mb-3">
                     <div className="flex items-center justify-between gap-2 px-2 mb-1">
-                        <div className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Prompt Templates</div>
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setShowGuide((v) => !v)}
-                                title="Template syntax guide"
-                                className={`inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold transition-all ${showGuide
-                                    ? 'bg-orange-600/30 border-orange-500/60 text-orange-300'
-                                    : 'bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
-                                    }`}
-                            >
-                                ?
-                            </button>
-                            <button
-                                onClick={() => { setPromptCreating((v) => !v); setPromptNewName(''); setErrorMsg(''); }}
-                                className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${promptCreating
-                                    ? 'bg-orange-600 border-orange-500 text-white'
-                                    : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
-                                    }`}
-                            >
-                                {promptCreating ? '✕' : '+ Add'}
-                            </button>
-                        </div>
+                        <button
+                            onClick={() => setPromptsCollapsed(!promptsCollapsed)}
+                            className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-gray-300 transition-colors"
+                        >
+                            <svg className={`w-3 h-3 transition-transform ${promptsCollapsed ? '-rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                            Prompt Templates
+                        </button>
+                        {!promptsCollapsed && (
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => setShowGuide((v) => !v)}
+                                    title="Template syntax guide"
+                                    className={`inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold transition-all ${showGuide
+                                        ? 'bg-orange-600/30 border-orange-500/60 text-orange-300'
+                                        : 'bg-gray-800 border-gray-700 text-gray-500 hover:text-gray-300 hover:border-gray-600'
+                                        }`}
+                                >
+                                    ?
+                                </button>
+                                <button
+                                    onClick={() => { setPromptCreating((v) => !v); setPromptNewName(''); setErrorMsg(''); }}
+                                    className={`inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded border transition-all font-medium ${promptCreating
+                                        ? 'bg-orange-600 border-orange-500 text-white'
+                                        : 'bg-gray-800 border-gray-700 text-orange-400 hover:bg-gray-750 hover:text-orange-300 hover:border-gray-600'
+                                        }`}
+                                >
+                                    {promptCreating ? '✕' : '+ Add'}
+                                </button>
+                            </div>
+                        )}
                     </div>
 
-                    {showGuide && (
-                        <div className="mx-2 mb-2 rounded-lg border border-orange-500/30 bg-gray-950/80 overflow-hidden">
-                            <div className="px-3 py-2 border-b border-orange-500/20 flex items-center gap-1.5">
-                                <span className="text-orange-400 text-xs font-semibold">Template syntax</span>
-                            </div>
-                            <pre className="px-3 py-2 text-[10px] leading-relaxed text-gray-400 whitespace-pre overflow-x-auto">{
-                                `---
+                    {!promptsCollapsed && (
+                        <>
+                            {showGuide && (
+                                <div className="mx-2 mb-2 rounded-lg border border-orange-500/30 bg-gray-950/80 overflow-hidden">
+                                    <div className="px-3 py-2 border-b border-orange-500/20 flex items-center gap-1.5">
+                                        <span className="text-orange-400 text-xs font-semibold">Template syntax</span>
+                                    </div>
+                                    <pre className="px-3 py-2 text-[10px] leading-relaxed text-gray-400 whitespace-pre overflow-x-auto">{
+                                        `---
 name: My Prompt
 description: What this prompt does
 params:
@@ -513,42 +627,44 @@ params:
 
 Review {{repo}} (session: {{session}}).
 Focus on {{focus}}.`
-                            }</pre>
-                            <div className="px-3 py-2 border-t border-orange-500/20">
-                                <p className="text-[10px] text-gray-500">
-                                    Param types: <span className="text-orange-300/80">text</span> · <span className="text-orange-300/80">repo</span> · <span className="text-orange-300/80">session</span>
-                                    <span className="ml-2 text-gray-600">— Use</span> <span className="text-orange-300/80">{'{{'}<span>param</span>{'}}'}</span> <span className="text-gray-600">to insert values.</span>
-                                </p>
-                            </div>
-                        </div>
-                    )}
+                                    }</pre>
+                                    <div className="px-3 py-2 border-t border-orange-500/20">
+                                        <p className="text-[10px] text-gray-500">
+                                            Param types: <span className="text-orange-300/80">text</span> · <span className="text-orange-300/80">repo</span> · <span className="text-orange-300/80">session</span>
+                                            <span className="ml-2 text-gray-600">— Use</span> <span className="text-orange-300/80">{'{{'}<span>param</span>{'}}'}</span> <span className="text-gray-600">to insert values.</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
 
-                    {promptCreating && (
-                        <div className="mx-2 mb-2 p-2 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-1.5">
-                            <input
-                                className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
-                                placeholder="my-prompt.md"
-                                value={promptNewName}
-                                onChange={(e) => setPromptNewName(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && createPromptFile()}
-                                autoFocus
-                            />
-                            <p className="text-[10px] text-gray-500">Creates a prompt template with sample YAML frontmatter.</p>
-                            <button
-                                onClick={createPromptFile}
-                                disabled={promptCreatingBusy || !promptNewName.trim()}
-                                className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                {promptCreatingBusy ? 'Creating…' : 'Create Prompt'}
-                            </button>
-                            {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}
-                        </div>
-                    )}
+                            {promptCreating && (
+                                <div className="mx-2 mb-2 p-2 bg-gray-800/80 border border-gray-700/60 rounded-lg space-y-1.5">
+                                    <input
+                                        className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded-md placeholder-gray-600 text-gray-100 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                        placeholder="my-prompt.md"
+                                        value={promptNewName}
+                                        onChange={(e) => setPromptNewName(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && createPromptFile()}
+                                        autoFocus
+                                    />
+                                    <p className="text-[10px] text-gray-500">Creates a prompt template with sample YAML frontmatter.</p>
+                                    <button
+                                        onClick={createPromptFile}
+                                        disabled={promptCreatingBusy || !promptNewName.trim()}
+                                        className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                    >
+                                        {promptCreatingBusy ? 'Creating…' : 'Create Prompt'}
+                                    </button>
+                                    {errorMsg && <p className="text-xs text-red-400">{errorMsg}</p>}
+                                </div>
+                            )}
 
-                    {promptFiles.length === 0 && !promptCreating ? (
-                        <div className="text-xs text-gray-600 px-2 py-1 italic">No prompt templates yet</div>
-                    ) : (
-                        promptFiles.map(renderFileItem)
+                            {promptFiles.length === 0 && !promptCreating ? (
+                                <div className="text-xs text-gray-600 px-2 py-1 italic">No prompt templates yet</div>
+                            ) : (
+                                promptFiles.map(renderFileItem)
+                            )}
+                        </>
                     )}
                 </div>
             </div>

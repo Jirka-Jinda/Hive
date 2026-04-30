@@ -77,7 +77,7 @@ describe('UsageModal', () => {
     expect(screen.getByText('Primary Key')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
-    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Close (Esc)' }));
 
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);

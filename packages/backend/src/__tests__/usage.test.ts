@@ -131,23 +131,23 @@ describe('Usage analytics', () => {
     expect(body.totals.total_tokens).toBe(summary.totals.total_tokens);
   });
 
-  it('deletes session totals but preserves repo-wide rollups', () => {
+  it('deletes session totals but preserves repo-wide rollups', async () => {
     const beforeDelete = usageService.getSummary(repoId);
     expect(beforeDelete.sessions.some((row) => row.session_id === sessionId)).toBe(true);
     expect(beforeDelete.totals.total_tokens).toBeGreaterThan(0);
 
-    workspace.deleteSession(repoId, sessionId);
+    await workspace.deleteSession(repoId, sessionId);
 
     const afterDelete = usageService.getSummary(repoId);
     expect(afterDelete.sessions.some((row) => row.session_id === sessionId)).toBe(false);
     expect(afterDelete.totals.total_tokens).toBe(beforeDelete.totals.total_tokens);
   });
 
-  it('removes repo-wide rollups when the repo is deleted', () => {
+  it('removes repo-wide rollups when the repo is deleted', async () => {
     const beforeDelete = usageService.getSummary(repoId);
     expect(beforeDelete.totals.total_tokens).toBeGreaterThan(0);
 
-    workspace.deleteRepo(repoId);
+    await workspace.deleteRepo(repoId);
 
     const afterDelete = usageService.getSummary();
     expect(afterDelete.totals.total_tokens).toBe(0);

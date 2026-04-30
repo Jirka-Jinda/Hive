@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
-import type { GitBranchOption, MdFile, Session } from '../../api/client';
+import type { GitBranchOption, MdFile, Session, SessionBranchMode } from '../../api/client';
 import AgentPicker from './AgentPicker';
 import MdFilePicker from './MdFilePicker';
 
 function getSessionBranchLabel(session: Session): string | null {
+    if (session.branch_mode === 'root') {
+        const branch = session.is_detached ? session.head_ref : session.current_branch;
+        return branch ? `Repo root: ${branch}` : 'Repo root';
+    }
+
     if (session.is_detached) {
         return session.head_ref ?? 'HEAD';
     }
@@ -105,7 +110,7 @@ export default function SessionList() {
     const [savingEdit, setSavingEdit] = useState(false);
     const [restartingSessionId, setRestartingSessionId] = useState<number | null>(null);
     const [refreshingSessions, setRefreshingSessions] = useState(false);
-    const [branchMode, setBranchMode] = useState<'new' | 'existing'>('new');
+    const [branchMode, setBranchMode] = useState<SessionBranchMode>('new');
     const [branchName, setBranchName] = useState('');
     const [branchSearch, setBranchSearch] = useState('');
     const [branchOptions, setBranchOptions] = useState<GitBranchOption[]>([]);
@@ -179,7 +184,7 @@ export default function SessionList() {
             return;
         }
         const trimmedBranchName = branchName.trim();
-        if (selectedRepo.is_git_repo && !trimmedBranchName) {
+        if (selectedRepo.is_git_repo && branchMode !== 'root' && !trimmedBranchName) {
             setErrorMsg(branchMode === 'new' ? 'Branch name is required for git sessions' : 'Select an available branch');
             return;
         }
@@ -191,7 +196,7 @@ export default function SessionList() {
                 agentType,
                 credentialId: credId,
                 branchMode: selectedRepo.is_git_repo ? branchMode : undefined,
-                branchName: selectedRepo.is_git_repo ? trimmedBranchName : undefined,
+                branchName: selectedRepo.is_git_repo && branchMode !== 'root' ? trimmedBranchName : undefined,
             });
             // Save MD refs BEFORE connecting the terminal (terminal reads refs on PTY spawn)
             if (selectedRefs.length > 0) {
@@ -341,7 +346,7 @@ export default function SessionList() {
                             <div>
                                 <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Git Branch</div>
                                 <p className="mt-1 text-[11px] text-gray-500">
-                                    Create an isolated worktree from a new branch or attach this session to an available local branch.
+                                    Create an isolated worktree from a branch, or run directly in the shared repo root.
                                 </p>
                             </div>
                             <div className="flex gap-1 p-0.5 bg-gray-950/80 rounded border border-gray-700/60">
@@ -372,9 +377,27 @@ export default function SessionList() {
                                 >
                                     Existing branch
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setBranchMode('root');
+                                        setBranchName('');
+                                        setBranchSearch('');
+                                    }}
+                                    className={`flex-1 text-xs py-1 rounded transition-all font-medium ${branchMode === 'root'
+                                        ? 'bg-orange-600 text-white shadow-sm'
+                                        : 'text-gray-400 hover:text-gray-200'
+                                        }`}
+                                >
+                                    Repo root
+                                </button>
                             </div>
 
-                            {branchMode === 'new' ? (
+                            {branchMode === 'root' ? (
+                                <p className="rounded-md border border-amber-700/30 bg-amber-950/20 px-2.5 py-1.5 text-[11px] text-amber-100/90">
+                                    Uses the current checkout directly. Changes are shared with the repo root.
+                                </p>
+                            ) : branchMode === 'new' ? (
                                 <input
                                     className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                     placeholder="Branch name"

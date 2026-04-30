@@ -77,7 +77,7 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
       name: string;
       agentType: string;
       credentialId?: number;
-      branchMode?: 'new' | 'existing';
+      branchMode?: 'new' | 'existing' | 'root';
       branchName?: string;
     }>();
     if (!body.name?.trim() || !body.agentType?.trim()) {
@@ -112,6 +112,25 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
 
   app.post('/:id/sessions/:sid/restart', (c) => {
     return jsonRoute(c, () => workspace.restartSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid')), { errorStatus: 404 });
+  });
+
+  // --- Session agent files (worktree-only .agent/ files not yet promoted to repo) ---
+
+  app.get('/:id/sessions/:sid/agent-files', (c) => jsonRoute(c, () => {
+    return workspace.listSessionAgentFiles(parseIdParam(c, 'id'), parseIdParam(c, 'sid'));
+  }, { errorStatus: 404 }));
+
+  app.post('/:id/sessions/:sid/agent-files/promote', async (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const sessionId = parseIdParam(c, 'sid');
+    const body = await c.req.json<{ agentRelativePath: string }>();
+    if (!body.agentRelativePath?.trim()) {
+      return c.json({ error: 'agentRelativePath is required' }, 400);
+    }
+    return jsonRoute(c, () => workspace.promoteSessionAgentFile(repoId, sessionId, body.agentRelativePath), {
+      successStatus: 201,
+      errorStatus: 400,
+    });
   });
 
   // --- MD refs sub-resources ---

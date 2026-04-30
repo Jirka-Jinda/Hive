@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import type Database from 'better-sqlite3';
 import { Config } from '../utils/config';
 import type { SettingsService } from './settings-service';
 import type { SessionBranchMode } from './session-store';
+
+type WorktreeBranchMode = Exclude<SessionBranchMode, 'root'>;
 
 export interface Repo {
   id: number;
@@ -59,6 +61,47 @@ interface GitWorktreeInfo {
   isDetached: boolean;
 }
 
+const REMOVE_RETRY_DELAYS_MS = [75, 150, 300, 600, 1000, 1500];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Recursively removes a directory tree on Windows-friendly way.
+ * Before deleting each entry, chmod 0o777 is applied so that files with
+ * read-only attributes (e.g. pytest cache dirs, git object files) don't
+ * cause EPERM during lstat / unlink.
+ */
+function forceRmDir(dirPath: string): void {
+  if (!existsSync(dirPath)) return;
+
+  let entries: { name: string; isDirectory: () => boolean; isSymbolicLink: () => boolean }[] = [];
+  try {
+    entries = readdirSync(dirPath, { withFileTypes: true });
+  } catch {
+    // If we can't read the dir, try to chmod it first and re-read.
+    try { chmodSync(dirPath, 0o777); } catch { /* ignore */ }
+    try { entries = readdirSync(dirPath, { withFileTypes: true }); } catch { return; }
+  }
+
+  for (const entry of entries) {
+    const entryPath = resolve(dirPath, entry.name);
+    try { chmodSync(entryPath, 0o777); } catch { /* ignore */ }
+
+    if (entry.isSymbolicLink()) {
+      try { unlinkSync(entryPath); } catch { /* ignore */ }
+    } else if (entry.isDirectory()) {
+      forceRmDir(entryPath);
+    } else {
+      try { unlinkSync(entryPath); } catch { /* ignore */ }
+    }
+  }
+
+  try { chmodSync(dirPath, 0o777); } catch { /* ignore */ }
+  try { rmdirSync(dirPath); } catch { /* ignore */ }
+}
+
 export class RepoManager {
   constructor(
     private db: Database.Database,
@@ -98,6 +141,28 @@ export class RepoManager {
 
   private buildManagedWorktreePath(repoId: number, sessionId: number): string {
     return resolve(this.getManagedWorktreeRoot(repoId), String(sessionId));
+  }
+
+  private async retryWorktreeRemoval(task: () => Promise<void> | void): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= REMOVE_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        await task();
+        return;
+      } catch (error) {
+        lastError = error;
+        const delay = REMOVE_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) break;
+        await sleep(delay);
+      }
+    }
+    throw lastError;
+  }
+
+  private async removeDirectoryWithRetries(path: string): Promise<void> {
+    await this.retryWorktreeRemoval(() => {
+      forceRmDir(path);
+    });
   }
 
   private parseWorktreeList(output: string, repoPath: string): GitWorktreeInfo[] {
@@ -192,7 +257,7 @@ export class RepoManager {
   async createSessionWorktree(
     repo: Repo,
     sessionId: number,
-    branchMode: SessionBranchMode,
+    branchMode: WorktreeBranchMode,
     branchName: string,
   ): Promise<string> {
     this.ensureGitRepo(repo);
@@ -219,7 +284,7 @@ export class RepoManager {
     const worktreePath = this.buildManagedWorktreePath(repo.id, sessionId);
     mkdirSync(dirname(worktreePath), { recursive: true });
     if (existsSync(worktreePath)) {
-      rmSync(worktreePath, { recursive: true, force: true });
+      await this.removeDirectoryWithRetries(worktreePath);
     }
 
     try {
@@ -233,7 +298,7 @@ export class RepoManager {
         await git.raw(['worktree', 'remove', '--force', worktreePath]);
       } catch {
         if (existsSync(worktreePath)) {
-          rmSync(worktreePath, { recursive: true, force: true });
+          await this.removeDirectoryWithRetries(worktreePath);
         }
       }
 
@@ -265,10 +330,12 @@ export class RepoManager {
     const git = simpleGit(repo.path);
 
     try {
-      await git.raw(['worktree', 'remove', '--force', resolvedPath]);
+      await this.retryWorktreeRemoval(async () => {
+        await git.raw(['worktree', 'remove', '--force', resolvedPath]);
+      });
     } catch {
       if (existsSync(resolvedPath)) {
-        rmSync(resolvedPath, { recursive: true, force: true });
+        await this.removeDirectoryWithRetries(resolvedPath);
       }
     }
 

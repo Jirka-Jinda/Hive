@@ -263,6 +263,46 @@ describe('SessionList', () => {
     expect(useAppStore.getState().selectedSession?.current_branch).toBe('feature/new-session');
   });
 
+  it('creates a git session on the repo root without a branch name', async () => {
+    const user = userEvent.setup();
+    apiMock.repos.sessions.create.mockResolvedValue({
+      id: 14,
+      repo_id: 1,
+      agent_type: 'claude',
+      credential_id: null,
+      name: 'Root Session',
+      status: 'stopped',
+      state: 'stopped',
+      branch_mode: 'root',
+      initial_branch_name: null,
+      worktree_path: null,
+      current_branch: 'main',
+      head_ref: 'main',
+      is_detached: false,
+      created_at: '2026-04-27T00:00:00Z',
+      updated_at: '2026-04-27T00:00:00Z',
+    });
+
+    render(<SessionList />);
+
+    await user.click(screen.getByRole('button', { name: '+ Add' }));
+    await user.click(screen.getByRole('button', { name: 'Repo root' }));
+    await user.type(screen.getByPlaceholderText('Session name'), 'Root Session');
+    await user.selectOptions(screen.getAllByRole('combobox')[0], 'claude');
+    await user.click(screen.getByRole('button', { name: 'Start Session' }));
+
+    await waitFor(() => {
+      expect(apiMock.repos.sessions.create).toHaveBeenCalledWith(1, {
+        name: 'Root Session',
+        agentType: 'claude',
+        credentialId: undefined,
+        branchMode: 'root',
+        branchName: undefined,
+      });
+    });
+    expect(useAppStore.getState().selectedSession?.worktree_path).toBeNull();
+  });
+
   it('keeps inactive sessions expanded with full names, branch badges, and visible actions', () => {
     render(<SessionList />);
 
