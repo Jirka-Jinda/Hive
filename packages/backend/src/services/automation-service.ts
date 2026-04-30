@@ -4,6 +4,7 @@ import { CronExpressionParser } from 'cron-parser';
 import type { MdFileManager } from './mdfile-manager';
 import type { SessionStore } from './session-store';
 import type { RepoManager } from './repo-manager';
+import type { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { getProcess } from './process-manager';
 import { renderTemplate } from '../utils/template';
 
@@ -41,13 +42,21 @@ export class AutomationService {
   private mdMgr: MdFileManager;
   private sessionStore: SessionStore;
   private repoManager: RepoManager;
+  private pipelineRegistry?: PipelineRegistry;
   private handles = new Map<number, cron.ScheduledTask>();
 
-  constructor(db: Database.Database, mdMgr: MdFileManager, sessionStore: SessionStore, repoManager: RepoManager) {
+  constructor(
+    db: Database.Database,
+    mdMgr: MdFileManager,
+    sessionStore: SessionStore,
+    repoManager: RepoManager,
+    pipelineRegistry?: PipelineRegistry,
+  ) {
     this.db = db;
     this.mdMgr = mdMgr;
     this.sessionStore = sessionStore;
     this.repoManager = repoManager;
+    this.pipelineRegistry = pipelineRegistry;
   }
 
   list(): AutomationTask[] {
@@ -163,7 +172,11 @@ export class AutomationService {
       if (!proc) {
         console.warn(`[Automation] Task ${taskId}: session ${task.session_id} has no running process`);
       } else {
-        proc.pty.write(rendered + '\n');
+        const input = rendered + '\n';
+        const transformed = this.pipelineRegistry
+          ? await this.pipelineRegistry.run('user-input', input, { sessionId: session.id, repoId: repo.id })
+          : input;
+        proc.pty.write(transformed);
       }
     } catch (err) {
       console.error(`[Automation] Task ${taskId} fire error:`, err);

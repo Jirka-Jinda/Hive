@@ -78,6 +78,7 @@ describe('GitHistoryModal', () => {
                     current_branch: 'feature/session-one',
                     head_ref: 'feature/session-one',
                     is_detached: false,
+                    sort_order: 0,
                 }}
                 onClose={onClose}
             />,

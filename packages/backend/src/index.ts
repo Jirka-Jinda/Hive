@@ -68,6 +68,7 @@ centralMdSync.startWatching();
 
 // ── Services (single instances shared across routes, WS, and pipelines) ───
 const sessionStore = new SessionStore(db);
+sessionStore.stopRunningSessions();
 const repoManager = new RepoManager(db, settingsService);
 const credentialStore = new CredentialStore(db);
 const mdRefService = new MdRefService(db);
@@ -91,7 +92,7 @@ pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, token
 pipelineRegistry.register(createSessionStateWatcherNode(sessionStore, notificationBus));
 
 // ── Automation ─────────────────────────────────────────────────────────────
-const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager);
+const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager, pipelineRegistry);
 automationService.startAll();
 
 // ── Hono app ───────────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ app.get('/api/health', (c) =>
 );
 
 // API routes
-app.route('/api/repos', reposRouter(workspace, mdRefService));
+app.route('/api/repos', reposRouter(workspace, mdRefService, pipelineRegistry));
 app.route('/api/credentials', credentialsRouter(credentialStore));
 app.route('/api/agents', agentsRouter());
 app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));

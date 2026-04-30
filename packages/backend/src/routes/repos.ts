@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import type { WorkspaceService } from '../application/workspace-service';
 import type { MdRefService } from '../services/md-ref-service';
+import type { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { getProcess } from '../services/process-manager';
 import { jsonRoute, parseIdParam } from './route-utils';
 
-export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefService): Hono {
+export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefService, pipelineRegistry?: PipelineRegistry): Hono {
   const app = new Hono();
 
   const parseOptionalQueryId = (raw: string | undefined, name: string): number | undefined => {
@@ -68,8 +69,35 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     );
   }, { errorStatus: 404 }));
 
+  app.post('/:id/git/commit', async (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const body = await c.req.json<{ message: string; sessionId?: number }>();
+    if (!body.message?.trim()) {
+      return c.json({ error: 'message is required' }, 400);
+    }
+    return jsonRoute(c, () => workspace.gitCommit(repoId, body.sessionId, body.message), { errorStatus: 400 });
+  });
+
+  app.post('/:id/git/push', async (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const body = await c.req.json<{ sessionId?: number; remote?: string; branch?: string }>();
+    return jsonRoute(c, () => workspace.gitPush(repoId, body.sessionId, body.remote, body.branch), { errorStatus: 400 });
+  });
+
   // --- Sessions sub-resource ---
   app.get('/:id/sessions', (c) => jsonRoute(c, () => workspace.listSessions(parseIdParam(c, 'id')), { errorStatus: 404 }));
+
+  app.put('/:id/sessions/reorder', async (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const body = await c.req.json<{ orderedIds: number[] }>();
+    if (!Array.isArray(body.orderedIds)) {
+      return c.json({ error: 'orderedIds must be an array' }, 400);
+    }
+    return jsonRoute(c, () => {
+      workspace.reorderSessions(repoId, body.orderedIds);
+      return { ok: true };
+    }, { errorStatus: 404 });
+  });
 
   app.post('/:id/sessions', async (c) => {
     const repoId = parseIdParam(c, 'id');
@@ -160,12 +188,27 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
   });
 
   app.post('/:id/sessions/:sid/inject', async (c) => {
+    const repoId = parseIdParam(c, 'id');
     const sessionId = parseIdParam(c, 'sid');
     const body = await c.req.json<{ text: string }>();
-    const proc = getProcess(sessionId);
-    if (!proc) return c.json({ error: 'Session not running' }, 404);
-    proc.pty.write(body.text);
-    return c.json({ ok: true });
+    return jsonRoute(c, async () => {
+      workspace.getSession(repoId, sessionId);
+      const proc = getProcess(sessionId);
+      if (!proc) throw new Error('Session not running');
+      const text = pipelineRegistry
+        ? await pipelineRegistry.run('user-input', body.text, { sessionId, repoId })
+        : body.text;
+      proc.pty.write(text);
+      return { ok: true };
+    }, { errorStatus: 404 });
+  });
+
+  app.get('/:id/sessions/:sid/logs/search', (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const sessionId = parseIdParam(c, 'sid');
+    const q = c.req.query('q') ?? '';
+    if (!q.trim()) return c.json([]);
+    return jsonRoute(c, () => workspace.searchSessionLogs(repoId, sessionId, q), { errorStatus: 404 });
   });
 
   return app;

@@ -33,6 +33,11 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
     const [status, setStatus] = useState<GitStatus | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [commitMsg, setCommitMsg] = useState('');
+    const [committing, setCommitting] = useState(false);
+    const [pushing, setPushing] = useState(false);
+    const [actionError, setActionError] = useState('');
+    const [lastCommit, setLastCommit] = useState('');
 
     const sessionId = session?.id;
     const scopeLabel = session ? `Session worktree • ${session.name}` : `Repo root • ${repo.name}`;
@@ -57,6 +62,35 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
     useEffect(() => {
         void loadHistory();
     }, [repo.id, sessionId]);
+
+    const handleCommit = async () => {
+        if (!commitMsg.trim()) return;
+        setCommitting(true);
+        setActionError('');
+        setLastCommit('');
+        try {
+            const result = await api.repos.git.commit(repo.id, { message: commitMsg.trim(), sessionId });
+            setCommitMsg('');
+            setLastCommit(result.commit);
+            void loadHistory();
+        } catch (e: unknown) {
+            setActionError(e instanceof Error ? e.message : 'Commit failed');
+        } finally {
+            setCommitting(false);
+        }
+    };
+
+    const handlePush = async () => {
+        setPushing(true);
+        setActionError('');
+        try {
+            await api.repos.git.push(repo.id, { sessionId });
+        } catch (e: unknown) {
+            setActionError(e instanceof Error ? e.message : 'Push failed');
+        } finally {
+            setPushing(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -93,6 +127,36 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
                 </div>
 
                 <div className="p-4 space-y-4 overflow-y-auto">
+                    {/* Commit & Push panel */}
+                    <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-3 space-y-2">
+                        <div className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">Commit & Push</div>
+                        <div className="flex gap-2">
+                            <input
+                                className="flex-1 bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                                placeholder="Commit message"
+                                value={commitMsg}
+                                onChange={(e) => setCommitMsg(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && void handleCommit()}
+                            />
+                            <button
+                                onClick={() => { void handleCommit(); }}
+                                disabled={committing || !commitMsg.trim()}
+                                className="px-3 py-1.5 text-xs rounded-md bg-orange-600 hover:bg-orange-500 text-white font-medium border border-orange-500 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                            >
+                                {committing ? '…' : 'Commit'}
+                            </button>
+                            <button
+                                onClick={() => { void handlePush(); }}
+                                disabled={pushing}
+                                className="px-3 py-1.5 text-xs rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium border border-gray-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                            >
+                                {pushing ? '…' : 'Push'}
+                            </button>
+                        </div>
+                        {actionError && <p className="text-xs text-red-400">{actionError}</p>}
+                        {lastCommit && <p className="text-xs text-green-400">Committed: <span className="font-mono">{lastCommit}</span></p>}
+                    </div>
+
                     {error && (
                         <div className="rounded-lg border border-red-800/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">
                             {error}

@@ -14,6 +14,7 @@ export function resetAppStore(partial: Partial<ReturnType<typeof useAppStore.get
     activeView: 'terminal',
     settings: null,
     notifications: [],
+    repoAlerts: {},
     isLocked: false,
     ...partial,
   });

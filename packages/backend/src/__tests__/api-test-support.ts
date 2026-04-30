@@ -83,7 +83,7 @@ function makeTestApp() {
   app.route('/api/repos', reposRouter(workspace, mdRefService));
   app.route('/api/credentials', credentialsRouter(credentialStore));
   app.route('/api/agents', agentsRouter());
-  app.route('/api/mdfiles', mdfilesRouter(mdMgr, logService));
+  app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));
   app.route('/api/usage', usageRouter(usageService, repoManager));
   app.route('/api/settings', settingsRouter(settingsService));
   app.route('/api/pipeline', pipelineRouter(pipelineRegistry));

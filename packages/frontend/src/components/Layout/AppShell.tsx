@@ -14,6 +14,7 @@ import UsageModal from './UsageModal';
 import InstallToolsModal from './InstallToolsModal';
 import GitHistoryModal from './GitHistoryModal';
 import LogsModal from './LogsModal';
+import LogSearchModal from './LogSearchModal';
 import PromptPanel from '../Prompt/PromptPanel';
 import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
@@ -36,6 +37,7 @@ export default function AppShell() {
     const [showUsage, setShowUsage] = useState(false);
     const [showGitHistory, setShowGitHistory] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
+    const [showLogSearch, setShowLogSearch] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -282,6 +284,19 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 6.5h4a3 3 0 013 3v0M8.5 17.5h4a3 3 0 003-3v0" />
                                 </svg>
                             </button>
+                            <button
+                                onClick={() => setShowLogSearch(true)}
+                                title={selectedSession ? `Search logs for ${selectedSession.name}` : 'Select a session to search its logs'}
+                                disabled={!selectedSession}
+                                className={`${iconBtnBase} ${selectedSession
+                                    ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                    : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+                                </svg>
+                            </button>
                             {canOpenTargetInVsCode && gitContextRepo && (
                                 <button
                                     onClick={() => void openSelectedContextInVsCode()}
@@ -522,6 +537,13 @@ export default function AppShell() {
                 />
             )}
             {showLogs && <LogsModal onClose={() => setShowLogs(false)} />}
+            {showLogSearch && selectedSession && (
+                <LogSearchModal
+                    repo={repos.find((r) => r.id === selectedSession.repo_id) ?? { id: selectedSession.repo_id, name: '', path: '', source: 'local', git_url: null, created_at: '', is_git_repo: false }}
+                    session={selectedSession}
+                    onClose={() => setShowLogSearch(false)}
+                />
+            )}
             {showPrompts && <PromptPanel onClose={() => setShowPrompts(false)} />}
             {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}
             <ToastContainer />

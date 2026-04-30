@@ -37,7 +37,7 @@ export function useNotifications(): void {
             repoId?: number;
           };
           if (msg.type === 'session-state') {
-            updateSessionState(msg.sessionId, msg.state, msg.sessionName ?? '');
+            updateSessionState(msg.sessionId, msg.state, msg.sessionName ?? '', msg.repoId);
             return;
           }
 

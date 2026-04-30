@@ -4,6 +4,16 @@ export interface AgentAdapter {
   command: string;
   /** Regex tested against ANSI-stripped agent output to detect an idle prompt. */
   idlePattern: RegExp;
+  /** Regex tested against a stripped TUI repaint row to detect an empty input prompt. */
+  tuiIdlePattern?: RegExp;
+  /** For CLIs that repaint the latest prompt row while idle, any right chevron plus silence means idle. */
+  idleOnChevronQuiet?: boolean;
+  /**
+   * Milliseconds of output silence after the idle pattern fires before the
+   * session is declared idle. TUI CLIs use a longer debounce because they can
+   * repaint prompt chrome across several chunks.
+   */
+  idleDebounceMs?: number;
   buildArgs(envVars?: Record<string, string>): string[];
   envVars(envVars?: Record<string, string>): Record<string, string>;
   /**
@@ -95,7 +105,9 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
   copilot: {
     name: 'GitHub Copilot CLI',
     command: 'copilot',
-    idlePattern: /^\s*(>|\?|copilot>)\s*$/,
+    idlePattern: /^\s*(>|❯|\?|copilot>)\s*$/,
+    tuiIdlePattern: /[>❯]\s{2,}.*\/ commands\s+·\s+\?\s+help/i,
+    idleDebounceMs: 1000,
     buildArgs: () => [],
     // The copilot binary checks tokens in order: COPILOT_GITHUB_TOKEN >
     // GH_TOKEN > GITHUB_TOKEN > OS keychain (set by `copilot login`) > gh auth token.
@@ -133,7 +145,10 @@ export const AGENT_ADAPTERS: Record<string, AgentAdapter> = {
     name: 'Codex CLI',
     command: 'codex',
     // Matches the bare prompt line rendered by the Codex TUI after ANSI stripping
-    idlePattern: /^\s*[>❯]\s*$/,
+    idlePattern: /^\s*[>❯›]\s*$/,
+    tuiIdlePattern: /[>❯›]\s{2,}.*gpt-[\w.-]+/i,
+    idleOnChevronQuiet: true,
+    idleDebounceMs: 1000,
     buildArgs: () => [],
     envVars: (env = {}) => ({
       OPENAI_API_KEY: env['OPENAI_API_KEY'] ?? '',

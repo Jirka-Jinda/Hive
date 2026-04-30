@@ -87,6 +87,7 @@ export interface Session {
   current_branch?: string | null;
   head_ref?: string | null;
   is_detached?: boolean;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -225,6 +226,8 @@ export const api = {
         request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}`, { method: 'DELETE' }),
       restart: (repoId: number, sid: number) =>
         request<Session>(`/repos/${repoId}/sessions/${sid}/restart`, { method: 'POST' }),
+      reorder: (repoId: number, orderedIds: number[]) =>
+        request<{ ok: boolean }>(`/repos/${repoId}/sessions/reorder`, { method: 'PUT', body: JSON.stringify({ orderedIds }) }),
 
       agentFiles: {
         list: (repoId: number, sid: number) =>
@@ -250,6 +253,12 @@ export const api = {
           method: 'POST',
           body: JSON.stringify({ text }),
         }),
+      logs: {
+        search: (repoId: number, sid: number, q: string) => {
+          const params = new URLSearchParams({ q });
+          return request<{ snippet: string; log_id: number }[]>(`/repos/${repoId}/sessions/${sid}/logs/search?${params.toString()}`);
+        },
+      },
     },
 
     mdRefs: {
@@ -284,6 +293,10 @@ export const api = {
         const qs = params.toString();
         return request<GitHistoryEntry[]>(`/repos/${repoId}/git/history${qs ? `?${qs}` : ''}`);
       },
+      commit: (repoId: number, body: { message: string; sessionId?: number }) =>
+        request<{ commit: string }>(`/repos/${repoId}/git/commit`, { method: 'POST', body: JSON.stringify(body) }),
+      push: (repoId: number, body: { sessionId?: number; remote?: string; branch?: string }) =>
+        request<{ ok: boolean }>(`/repos/${repoId}/git/push`, { method: 'POST', body: JSON.stringify(body) }),
     },
   },
 

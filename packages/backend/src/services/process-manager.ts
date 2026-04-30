@@ -9,6 +9,7 @@ export interface ProcessEntry {
   workingDirectory: string;
   events: EventEmitter;
   exitPromise: Promise<number>;
+  outputBacklog: Buffer[];
 }
 
 const processes = new Map<number, ProcessEntry>();
@@ -69,10 +70,17 @@ export function spawnAgent(
   const exitPromise = new Promise<number>((resolve) => {
     resolveExit = resolve;
   });
-  const entry: ProcessEntry = { pty: proc, sessionId, workingDirectory, events, exitPromise };
+  const entry: ProcessEntry = { pty: proc, sessionId, workingDirectory, events, exitPromise, outputBacklog: [] };
   processes.set(sessionId, entry);
 
-  proc.onData((data: string) => events.emit('data', Buffer.from(data)));
+  proc.onData((data: string) => {
+    const chunk = Buffer.from(data);
+    if (events.listenerCount('data') === 0) {
+      entry.outputBacklog.push(chunk);
+      if (entry.outputBacklog.length > 200) entry.outputBacklog.shift();
+    }
+    events.emit('data', chunk);
+  });
   proc.onExit(({ exitCode }: { exitCode: number }) => {
     resolveExit(exitCode);
     events.emit('exit', exitCode);
@@ -84,6 +92,12 @@ export function spawnAgent(
 
 export function getProcess(sessionId: number): ProcessEntry | undefined {
   return processes.get(sessionId);
+}
+
+export function drainProcessOutputBacklog(entry: ProcessEntry): Buffer[] {
+  const chunks = entry.outputBacklog;
+  entry.outputBacklog = [];
+  return chunks;
 }
 
 export function killProcess(sessionId: number): void {

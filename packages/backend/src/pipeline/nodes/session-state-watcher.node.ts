@@ -2,14 +2,11 @@ import type { PipelineNode, PipelineContext } from '../types.js';
 import type { SessionStore } from '../../services/session-store.js';
 import type { NotificationBus } from '../../services/notification-bus.js';
 import { AGENT_ADAPTERS } from '../../services/agents.js';
+import type { AgentAdapter } from '../../services/agents.js';
+import { normalizeTerminalText } from '../../utils/terminal-text.js';
 
-// Matches common ANSI / VT escape sequences so we can test the raw text.
-// [0-9;?]* covers both standard and DEC-private-mode CSI params (e.g. \x1B[?25h, \x1B[?2004h).
-const ANSI_ESCAPE_RE = /\x1B\[[0-9;?]*[A-Za-z]|\x1B\][^\x07]*\x07|\x1B[PX^_].*?ST|\x1B[()][AB012]/g;
-
-function stripAnsi(text: string): string {
-  // Remove ANSI sequences then strip \r so multiline anchors work on PTY output.
-  return text.replace(ANSI_ESCAPE_RE, '').replace(/\r/g, '');
+function normalizeForPromptDetection(text: string): string {
+  return normalizeTerminalText(text);
 }
 
 interface DebounceEntry {
@@ -18,17 +15,58 @@ interface DebounceEntry {
 }
 
 const OUTPUT_TAIL_MAX = 512;
+const RIGHT_CHEVRON_RE = /[>❯›❱❭❵]/;
+const RIGHT_CHEVRON_START_RE = /^\s*[>❯›❱❭❵](?:\s|$)/u;
+const PROMPT_CHEVRON_RE = /(?:^|[\s\u2500-\u257f])[>❯›❱❭❵](?:\s{2,}|\s*$)/u;
+const TUI_FOOTER_RE = /(?:gpt-[\w.-]+|\/ commands\s+·\s+\?\s+help)/i;
+const TERMINAL_EVENT_INPUT_RE =
+  /(?:\x1B\[(?:I|O)|\x1B\[<\d+;\d+;\d+[mM]|\x1B\[M[\s\S]{3})/g;
 
 function appendOutputTail(outputTail: string, text: string): string {
-  return `${outputTail}${stripAnsi(text)}`.slice(-OUTPUT_TAIL_MAX);
+  return `${outputTail}${normalizeForPromptDetection(text)}`.slice(-OUTPUT_TAIL_MAX);
 }
 
-function getTrailingPromptCandidate(outputTail: string): string {
-  const trimmedTail = outputTail.replace(/\n+$/g, '');
-  if (!trimmedTail) return '';
+function getRecentPromptCandidates(outputTail: string): string[] {
+  // Strip trailing whitespace, newlines, and carriage returns.
+  const trimmedTail = outputTail.replace(/\s+$/g, '');
+  if (!trimmedTail) return [];
 
-  const lines = trimmedTail.split('\n');
-  return lines[lines.length - 1] ?? trimmedTail;
+  // normalizeTerminalText has already converted CRs and cursor row jumps into
+  // newlines. Scan a small window because TUI prompts and footers often occupy
+  // adjacent rows rather than one final line.
+  return trimmedTail
+    .split('\n')
+    .map((segment) => segment.trimEnd())
+    .filter((segment) => segment.trim())
+    .slice(-8);
+}
+
+function isIdlePromptTail(outputTail: string, adapter: AgentAdapter): boolean {
+  const candidates = getRecentPromptCandidates(outputTail);
+  const finalRow = candidates.at(-1);
+  if (!finalRow) return false;
+
+  const rowLooksIdle = (candidate: string) => (
+    adapter.idlePattern.test(candidate) ||
+    PROMPT_CHEVRON_RE.test(candidate) ||
+    (RIGHT_CHEVRON_RE.test(candidate) && (adapter.tuiIdlePattern?.test(candidate) ?? false))
+  );
+
+  if (rowLooksIdle(finalRow)) return true;
+
+  const previousRow = candidates.at(-2);
+  return Boolean(
+    previousRow &&
+    TUI_FOOTER_RE.test(finalRow) &&
+    (
+      rowLooksIdle(previousRow) ||
+      (adapter.idleOnChevronQuiet === true && RIGHT_CHEVRON_START_RE.test(previousRow))
+    ),
+  );
+}
+
+function isIgnorableTerminalEventInput(text: string): boolean {
+  return text.replace(TERMINAL_EVENT_INPUT_RE, '') === '';
 }
 
 export function createSessionStateWatcherNode(
@@ -36,7 +74,7 @@ export function createSessionStateWatcherNode(
   notificationBus: NotificationBus,
 ): PipelineNode {
   const debounceMap = new Map<number, DebounceEntry>();
-  const IDLE_DEBOUNCE_MS = 500;
+  const DEFAULT_IDLE_DEBOUNCE_MS = 1000;
 
   return {
     id: 'session-state-watcher',
@@ -51,15 +89,25 @@ export function createSessionStateWatcherNode(
 
       // On user input — cancel any pending idle debounce and mark as working
       if (phase === 'user-input') {
+        if (isIgnorableTerminalEventInput(text)) return text;
+
         const entry = debounceMap.get(sessionId);
         if (entry?.timer) {
           clearTimeout(entry.timer);
         }
         debounceMap.delete(sessionId);
         let sessionName = '';
-        try { sessionName = sessionStore.get(sessionId).name; } catch { /* ignore */ }
+        let sessionRepoId: number | undefined;
+        let sessionState: string | undefined;
+        try {
+          const s = sessionStore.get(sessionId);
+          sessionName = s.name;
+          sessionRepoId = s.repo_id;
+          sessionState = s.state;
+        } catch { /* ignore */ }
+        if (sessionState === 'working') return text;
         sessionStore.setState(sessionId, 'working');
-        notificationBus.emitSessionState({ sessionId, state: 'working', sessionName });
+        notificationBus.emitSessionState({ sessionId, repoId: sessionRepoId, state: 'working', sessionName });
         return text;
       }
 
@@ -74,8 +122,7 @@ export function createSessionStateWatcherNode(
         const entry = debounceMap.get(sessionId) ?? { outputTail: '' };
         entry.outputTail = appendOutputTail(entry.outputTail, text);
 
-        const promptCandidate = getTrailingPromptCandidate(entry.outputTail);
-        if (!promptCandidate || !adapter.idlePattern.test(promptCandidate)) {
+        if (!isIdlePromptTail(entry.outputTail, adapter)) {
           if (entry.timer) {
             clearTimeout(entry.timer);
             delete entry.timer;
@@ -87,15 +134,19 @@ export function createSessionStateWatcherNode(
         // Debounce: reset the timer on every matching chunk
         if (entry.timer) clearTimeout(entry.timer);
 
+        const idleDebounceMs = adapter.idleDebounceMs ?? DEFAULT_IDLE_DEBOUNCE_MS;
         entry.timer = setTimeout(() => {
           const latest = debounceMap.get(sessionId);
           if (latest) {
             delete latest.timer;
             debounceMap.set(sessionId, latest);
           }
+          let current;
+          try { current = sessionStore.get(sessionId); } catch { return; }
+          if (current.state !== 'working') return;
           sessionStore.setState(sessionId, 'idle');
-          notificationBus.emitSessionState({ sessionId, state: 'idle', sessionName: session.name });
-        }, IDLE_DEBOUNCE_MS);
+          notificationBus.emitSessionState({ sessionId, repoId: current.repo_id, state: 'idle', sessionName: current.name });
+        }, idleDebounceMs);
 
         debounceMap.set(sessionId, entry);
       }

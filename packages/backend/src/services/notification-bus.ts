@@ -6,6 +6,7 @@ export interface SessionStateEvent {
   sessionId: number;
   state: SessionAttentionState;
   sessionName?: string;
+  repoId?: number;
 }
 
 export interface MdFilesChangedEvent {

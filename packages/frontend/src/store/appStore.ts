@@ -4,6 +4,7 @@ import type { Repo, Session, Agent, Credential, MdFile, AppSettings } from '../a
 export interface AppNotification {
   id: string;
   sessionId: number;
+  repoId?: number;
   sessionName: string;
   state: 'working' | 'idle' | 'stopped';
   timestamp: number;
@@ -22,6 +23,8 @@ interface AppState {
   activeView: 'terminal' | 'editor';
   settings: AppSettings | null;
   notifications: AppNotification[];
+  /** repoId → count of unread "agent idle" alerts for sessions in that repo */
+  repoAlerts: Record<number, number>;
   isLocked: boolean;
 
   setRepos: (repos: Repo[]) => void;
@@ -37,9 +40,10 @@ interface AppState {
   setSelectedMdFile: (file: (MdFile & { content: string }) | null) => void;
   setActiveView: (view: 'terminal' | 'editor') => void;
   setSettings: (settings: AppSettings) => void;
-  updateSessionState: (sessionId: number, state: Session['state'], sessionName: string) => void;
+  updateSessionState: (sessionId: number, state: Session['state'], sessionName: string, repoId?: number) => void;
   pushNotification: (notification: AppNotification) => void;
   dismissNotification: (id: string) => void;
+  dismissRepoAlert: (repoId: number) => void;
   lock: () => void;
   unlock: () => void;
 }
@@ -57,6 +61,7 @@ export const useAppStore = create<AppState>((set) => ({
   activeView: 'terminal',
   settings: null,
   notifications: [],
+  repoAlerts: {},
   isLocked: false,
 
   setRepos: (repos) => set({ repos }),
@@ -103,7 +108,7 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveView: (view) => set({ activeView: view }),
   setSettings: (settings) => set({ settings }),
 
-  updateSessionState: (sessionId, state, sessionName) =>
+  updateSessionState: (sessionId, state, sessionName, repoId) =>
     set((s) => {
       const sessions = s.sessions.map((sess) =>
         sess.id === sessionId ? { ...sess, state } : sess
@@ -112,19 +117,29 @@ export const useAppStore = create<AppState>((set) => ({
         s.selectedSession?.id === sessionId
           ? { ...s.selectedSession, state }
           : s.selectedSession;
-      // Push notification only when idle and session is not currently selected
+
+      const previousSession = s.sessions.find((sess) => sess.id === sessionId);
+      const resolvedRepoId = repoId ?? previousSession?.repo_id;
+      const repoAlerts = { ...s.repoAlerts };
+      const becameIdle = state === 'idle' && previousSession?.state !== 'idle';
+      if (becameIdle && resolvedRepoId != null && s.selectedRepo?.id !== resolvedRepoId) {
+        repoAlerts[resolvedRepoId] = (repoAlerts[resolvedRepoId] ?? 0) + 1;
+      }
+
+      // Toast notification: only when session is not currently selected
       const isSelected = s.selectedSession?.id === sessionId;
-      if (state === 'idle' && !isSelected) {
+      if (becameIdle && !isSelected) {
         const notification: AppNotification = {
           id: `${sessionId}-${Date.now()}`,
           sessionId,
+          repoId: resolvedRepoId,
           sessionName,
           state,
           timestamp: Date.now(),
         };
-        return { sessions, selectedSession, notifications: [...s.notifications, notification] };
+        return { sessions, selectedSession, notifications: [...s.notifications, notification], repoAlerts };
       }
-      return { sessions, selectedSession };
+      return { sessions, selectedSession, repoAlerts };
     }),
 
   pushNotification: (notification) =>
@@ -132,6 +147,13 @@ export const useAppStore = create<AppState>((set) => ({
 
   dismissNotification: (id) =>
     set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) })),
+
+  dismissRepoAlert: (repoId) =>
+    set((s) => {
+      const repoAlerts = { ...s.repoAlerts };
+      delete repoAlerts[repoId];
+      return { repoAlerts };
+    }),
 
   lock: () => set({ isLocked: true }),
   unlock: () => set({ isLocked: false }),

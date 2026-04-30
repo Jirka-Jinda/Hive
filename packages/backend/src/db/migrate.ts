@@ -1,6 +1,14 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync } from 'node:fs';
 import { SCHEMA } from './schema';
+import { normalizeTerminalText } from '../utils/terminal-text';
+
+function normalizeLogSearchText(output: Buffer | string): string {
+  const raw = Buffer.isBuffer(output) ? output.toString('utf8') : String(output);
+  return normalizeTerminalText(raw)
+    .replace(/[^\S\r\n]+/g, ' ')
+    .trim();
+}
 
 export function migrate(db: Database.Database): void {
   db.exec(SCHEMA);
@@ -18,6 +26,9 @@ export function migrate(db: Database.Database): void {
   }
   if (!sessionCols.some((c) => c.name === 'worktree_path')) {
     db.exec('ALTER TABLE sessions ADD COLUMN worktree_path TEXT');
+  }
+  if (!sessionCols.some((c) => c.name === 'sort_order')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
   }
 
   // Add content column if it doesn't exist yet (existing DBs)
@@ -90,5 +101,38 @@ export function migrate(db: Database.Database): void {
         created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
       )
     `);
+  }
+
+  // Create or rebuild the FTS5 index for session log search on existing DBs.
+  // Older builds used a contentless FTS table, which does not preserve
+  // UNINDEXED metadata columns for filtering/snippets.
+  const ftsTable = (db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='session_logs_fts'"
+  ).get()) as { sql: string | null } | undefined;
+  const needsFtsRebuild = !ftsTable || /content\s*=\s*''/i.test(ftsTable.sql ?? '');
+  if (needsFtsRebuild) {
+    db.exec(`
+      DROP TABLE IF EXISTS session_logs_fts;
+      CREATE VIRTUAL TABLE session_logs_fts USING fts5(
+        text,
+        log_id UNINDEXED,
+        session_id UNINDEXED,
+        tokenize='unicode61'
+      )
+    `);
+
+    const rows = db.prepare('SELECT id, session_id, output FROM session_logs ORDER BY id ASC').all() as {
+      id: number;
+      session_id: number;
+      output: Buffer | string;
+    }[];
+    const insert = db.prepare('INSERT INTO session_logs_fts (text, log_id, session_id) VALUES (?, ?, ?)');
+    const backfill = db.transaction(() => {
+      for (const row of rows) {
+        const text = normalizeLogSearchText(row.output);
+        if (text) insert.run(text, row.id, row.session_id);
+      }
+    });
+    backfill();
   }
 }

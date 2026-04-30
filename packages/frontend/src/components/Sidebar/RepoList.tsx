@@ -73,6 +73,8 @@ function ActionButton({
 export default function RepoList() {
     const { repos, selectedRepo, setRepos, setSelectedRepo, updateRepo, setSessions, setSelectedSession, setMdFiles, mdFiles } =
         useAppStore();
+    const repoAlerts = useAppStore((s) => s.repoAlerts);
+    const dismissRepoAlert = useAppStore((s) => s.dismissRepoAlert);
     const [showAdd, setShowAdd] = useState(false);
     const [isGit, setIsGit] = useState(false);
     const [gitInput, setGitInput] = useState('');
@@ -110,6 +112,7 @@ export default function RepoList() {
     }, [showAdd, isGit]);
 
     const selectRepo = async (repo: Repo) => {
+        dismissRepoAlert(repo.id);
         setSelectedRepo(repo);
         setRepoRefs([]);
         const [sessions, repoMdFiles, refs] = await Promise.all([
@@ -421,6 +424,14 @@ export default function RepoList() {
                                                 <RepoIcon isGitRepo={repo.is_git_repo} className="w-4 h-4" />
                                             </span>
                                             <span className="truncate">{repo.name}</span>
+                                            {(repoAlerts[repo.id] ?? 0) > 0 && (
+                                                <span
+                                                    className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-amber-400/40 bg-amber-500/10 px-1 text-[10px] font-bold leading-none text-amber-200 shrink-0"
+                                                    title="Session ready"
+                                                >
+                                                    !
+                                                </span>
+                                            )}
                                             {(repo.session_count ?? 0) > 0 && (
                                                 <span
                                                     className={`inline-flex items-center justify-center min-w-[1.15rem] h-4 px-1 rounded-full text-[10px] font-medium ${isActive

@@ -236,4 +236,49 @@ describe('useNotifications', () => {
     expect(files).toHaveLength(1);
     expect(files[0].path).toBe('existing.md');
   });
+
+  it('records idle alerts for sessions outside the active repo', async () => {
+    resetAppStore({
+      selectedRepo: { id: 2, name: 'active-repo', path: '/repos/active', source: 'local', git_url: null, is_git_repo: false, created_at: '2026-04-27T00:00:00Z' },
+      sessions: [
+        {
+          id: 20,
+          repo_id: 2,
+          agent_type: 'codex',
+          credential_id: null,
+          name: 'Visible Session',
+          status: 'running',
+          state: 'working',
+          sort_order: 0,
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+      ],
+    });
+
+    render(<Harness />);
+
+    const ws = MockWebSocket.instances[0];
+    ws.emitMessage({
+      type: 'session-state',
+      sessionId: 99,
+      repoId: 7,
+      sessionName: 'Background Session',
+      state: 'idle',
+    });
+
+    await waitFor(() => {
+      expect(useAppStore.getState().repoAlerts[7]).toBe(1);
+    });
+
+    expect(useAppStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        sessionId: 99,
+        repoId: 7,
+        sessionName: 'Background Session',
+        state: 'idle',
+      }),
+    ]);
+    expect(useAppStore.getState().sessions[0]?.state).toBe('working');
+  });
 });

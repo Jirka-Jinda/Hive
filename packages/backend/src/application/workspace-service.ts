@@ -43,8 +43,22 @@ export interface SessionAgentFile {
   repoRelativePath: string;
 }
 
+interface RepoMdFileSnapshot {
+  path: string;
+  content: string;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function inferAgentMdType(path: string): MdFile['type'] {
+  const lower = path.toLowerCase();
+  if (lower.includes('skill')) return 'skill';
+  if (lower.includes('tool')) return 'tool';
+  if (lower.includes('prompt')) return 'prompt';
+  if (lower.includes('instruction') || lower.includes('copilot') || lower.includes('agent')) return 'instruction';
+  return 'other';
 }
 
 export class WorkspaceService {
@@ -122,19 +136,15 @@ export class WorkspaceService {
   }
 
   /**
-   * Re-discovers md files on disk for the given repo root and imports any
-   * new/changed files into the DB. Session worktree files are NOT merged back
-   * here — they are managed separately via promoteSessionAgentFile.
-   * After updating the DB, syncs all repo agent files downstream to every
-   * session worktree.
+   * Re-discovers md files on disk for the given repo root, first promoting
+   * session worktree `.agent/` updates back to the repo root. Worktree copies
+   * intentionally win over older repo markdown so an idle agent's generated
+   * prompts are captured without a manual promotion step.
    */
   rediscoverRepoMdFiles(repoId: number): void {
     const repo = this.repoManager.get(repoId);
 
-    const currentAgentPaths = new Set<string>();
-    for (const file of readAgentMarkdownFiles(repo.path)) {
-      currentAgentPaths.add(file.repoRelativePath);
-    }
+    const currentAgentPaths = this.mergeSessionAgentFilesIntoRepo(repo);
 
     const discovered = discoverRepoMdFiles(repo.path);
     const isAgentFile = (path: string) => path.toLowerCase().startsWith(`${AGENT_MD_DIR}/`);
@@ -149,7 +159,9 @@ export class WorkspaceService {
     this.mdFileManager.pruneMissingRepoAgentFiles(repoId, currentAgentPaths);
 
     // Propagate changes downstream to all session worktrees.
-    void this.syncRepoFilesToAllWorktrees(repoId);
+    void this.syncRepoFilesToAllWorktrees(repoId).catch((error) => {
+      console.warn('[WorkspaceService] Failed to sync repo files after rediscovery', { repoId, error });
+    });
   }
 
   deleteRepo(id: number, deleteFromDisk = false): Promise<void> {
@@ -200,6 +212,42 @@ export class WorkspaceService {
     const repo = this.repoManager.get(repoId);
     const sessions = this.sessionStore.list(repoId);
     return Promise.all(sessions.map((session) => this.toSessionView(session, repo)));
+  }
+
+  reorderSessions(repoId: number, orderedIds: number[]): void {
+    this.repoManager.get(repoId); // validates repo exists
+    this.sessionStore.reorder(repoId, orderedIds);
+  }
+
+  async gitCommit(repoId: number, sessionId: number | undefined, message: string): Promise<{ commit: string }> {
+    const repo = this.repoManager.get(repoId);
+    const worktreePath = sessionId !== undefined
+      ? this.sessionStore.get(sessionId).worktree_path
+      : null;
+    const commit = await this.repoManager.commitChanges(repo, worktreePath, message);
+    this.logService?.logUserAction('git_commit', `Committed in repo "${repo.name}"${sessionId !== undefined ? ` (session ${sessionId})` : ''}: ${message.slice(0, 80)}`);
+    return { commit };
+  }
+
+  async gitPush(repoId: number, sessionId: number | undefined, remote?: string, branch?: string): Promise<void> {
+    const repo = this.repoManager.get(repoId);
+    const worktreePath = sessionId !== undefined
+      ? this.sessionStore.get(sessionId).worktree_path
+      : null;
+    await this.repoManager.pushBranch(repo, worktreePath, remote, branch);
+    this.logService?.logUserAction('git_push', `Pushed in repo "${repo.name}"${sessionId !== undefined ? ` (session ${sessionId})` : ''}`);
+  }
+
+  searchSessionLogs(repoId: number, sessionId: number, query: string): { snippet: string; log_id: number }[] {
+    this.repoManager.get(repoId); // validates repo exists
+    const session = this.sessionStore.get(sessionId);
+    if (session.repo_id !== repoId) throw new Error(`Session ${sessionId} does not belong to repo ${repoId}`);
+    return this.sessionStore.searchLogs(sessionId, query);
+  }
+
+  getSession(repoId: number, sessionId: number): Session {
+    this.repoManager.get(repoId); // validates repo exists
+    return this.getSessionForRepo(repoId, sessionId);
   }
 
   async updateSession(repoId: number, sessionId: number, input: { name: string }): Promise<SessionWithGitStatus> {
@@ -284,7 +332,8 @@ export class WorkspaceService {
             branchMode,
             initialBranchName,
           );
-          this.syncRepoFilesToWorktree(repo.id, createdWorktreePath);
+          const repoFiles = this.snapshotRepoMdFiles(repo.id);
+          if (repoFiles.length > 0) this.syncRepoFilesToWorktree(repo.id, createdWorktreePath, repoFiles);
           const updated = this.sessionStore.updateGitMetadata(session.id, { worktreePath: createdWorktreePath });
           this.logService?.logUserAction(
             'create_session',
@@ -481,12 +530,7 @@ export class WorkspaceService {
     const content = readFileSync(fullPath, 'utf8');
     const repoPath = toRepoAgentPath(normalized);
 
-    const filename = normalized.split('/').pop()!.toLowerCase();
-    let type: MdFile['type'] = 'other';
-    if (filename.includes('skill')) type = 'skill';
-    else if (filename.includes('tool')) type = 'tool';
-    else if (filename.includes('prompt')) type = 'prompt';
-    else if (filename.includes('instruction') || filename.includes('copilot') || filename.includes('agent')) type = 'instruction';
+    const type = inferAgentMdType(normalized);
 
     const repo = this.repoManager.get(repoId);
 
@@ -513,18 +557,22 @@ export class WorkspaceService {
    * discovery cycles.
    */
   async syncRepoFilesToAllWorktrees(repoId: number): Promise<void> {
+    const repo = this.repoManager.get(repoId);
     const sessions = this.sessionStore.list(repoId);
     const worktreePaths = sessions
       .map((s) => s.worktree_path)
       .filter((p): p is string => Boolean(p))
-      .filter((p) => this.normalizePath(p) !== this.normalizePath(this.repoManager.get(repoId).path));
+      .filter((p) => this.normalizePath(p) !== this.normalizePath(repo.path));
 
     if (worktreePaths.length === 0) return;
+
+    const files = this.snapshotRepoMdFiles(repoId);
+    if (files.length === 0) return;
 
     const releaseWatch = await this.suppressAgentMdWatchRoots(worktreePaths);
     try {
       for (const worktreePath of worktreePaths) {
-        this.syncRepoFilesToWorktree(repoId, worktreePath);
+        this.syncRepoFilesToWorktree(repoId, worktreePath, files);
       }
     } finally {
       releaseWatch();
@@ -558,10 +606,7 @@ export class WorkspaceService {
     }
   }
 
-  private syncRepoFilesToWorktree(repoId: number, worktreePath: string): void {
-    const files = this.mdFileManager.list('repo', repoId);
-    if (files.length === 0) return;
-
+  private syncRepoFilesToWorktree(repoId: number, worktreePath: string, files: readonly RepoMdFileSnapshot[]): void {
     let agentDir: string;
     try {
       agentDir = ensureAgentDir(worktreePath);
@@ -577,10 +622,9 @@ export class WorkspaceService {
         const targetPath = resolve(agentDir, agentRelativePath);
         const targetKey = this.normalizePath(targetPath);
         if (writtenTargets.has(targetKey)) continue;
-        const { content } = this.mdFileManager.read(file.id);
         mkdirSync(dirname(targetPath), { recursive: true });
-        if (!existsSync(targetPath) || readFileSync(targetPath, 'utf8') !== content) {
-          writeFileSync(targetPath, content, 'utf8');
+        if (!existsSync(targetPath) || readFileSync(targetPath, 'utf8') !== file.content) {
+          writeFileSync(targetPath, file.content, 'utf8');
         }
         writtenTargets.add(targetKey);
       } catch (error) {
@@ -589,6 +633,41 @@ export class WorkspaceService {
         });
       }
     }
+  }
+
+  private snapshotRepoMdFiles(repoId: number): RepoMdFileSnapshot[] {
+    return this.mdFileManager.list('repo', repoId).map((file) => ({
+      path: file.path,
+      content: this.mdFileManager.read(file.id).content,
+    }));
+  }
+
+  private mergeSessionAgentFilesIntoRepo(repo: Repo): Set<string> {
+    const currentAgentPaths = new Set<string>();
+    for (const file of readAgentMarkdownFiles(repo.path)) {
+      currentAgentPaths.add(file.repoRelativePath);
+    }
+
+    const repoPath = this.normalizePath(repo.path);
+    let repoAgentDir: string | null = null;
+    for (const session of this.sessionStore.list(repo.id)) {
+      if (!session.worktree_path || this.normalizePath(session.worktree_path) === repoPath) continue;
+
+      for (const file of readAgentMarkdownFiles(session.worktree_path)) {
+        currentAgentPaths.add(file.repoRelativePath);
+        repoAgentDir ??= ensureAgentDir(repo.path);
+        const targetPath = resolve(repoAgentDir, file.agentRelativePath);
+        const rel = relative(repoAgentDir, targetPath);
+        if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
+
+        mkdirSync(dirname(targetPath), { recursive: true });
+        if (!existsSync(targetPath) || readFileSync(targetPath, 'utf8') !== file.content) {
+          writeFileSync(targetPath, file.content, 'utf8');
+        }
+      }
+    }
+
+    return currentAgentPaths;
   }
 
   private getSessionForRepo(repoId: number, sessionId: number): Session {

@@ -340,6 +340,26 @@ describe('Repos API', () => {
       expect((await res.json()).error).toMatch(/not running/i);
     });
 
+    it('POST /api/repos/:id/sessions/:sid/inject — 404 for mismatched repo/session pair', async () => {
+      const otherRepoPath = join(testPaths.root, 'repos-api-inject-other-repo');
+      mkdirSync(otherRepoPath, { recursive: true });
+      const otherRepoRes = await req(getApp(), '/api/repos', {
+        method: 'POST',
+        body: { path: otherRepoPath, name: 'inject-other-repo' },
+      });
+      expect(otherRepoRes.status).toBe(201);
+      const otherRepoId = (await otherRepoRes.json()).id;
+
+      const res = await req(getApp(), `/api/repos/${otherRepoId}/sessions/${sessionId}/inject`, {
+        method: 'POST',
+        body: { text: 'hello' },
+      });
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toMatch(/does not belong to repo/i);
+
+      await req(getApp(), `/api/repos/${otherRepoId}`, { method: 'DELETE' });
+    });
+
     it('POST /api/repos/:id/sessions/:sid/restart — resets session to stopped', async () => {
       const res = await req(getApp(), `/api/repos/${repoId}/sessions/${sessionId}/restart`, {
         method: 'POST',

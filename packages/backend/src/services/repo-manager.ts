@@ -376,6 +376,26 @@ export class RepoManager {
     return worktreePath ? resolve(worktreePath) : repo.path;
   }
 
+  async commitChanges(repo: Repo, worktreePath: string | null, message: string): Promise<string> {
+    this.ensureGitRepo(repo);
+    if (!message.trim()) throw new Error('Commit message is required');
+    const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
+    const git = simpleGit(targetPath);
+    // Stage all changes (including untracked)
+    await git.add('--all');
+    const result = await git.commit(message.trim());
+    return result.commit;
+  }
+
+  async pushBranch(repo: Repo, worktreePath: string | null, remote = 'origin', branch?: string): Promise<void> {
+    this.ensureGitRepo(repo);
+    const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
+    const git = simpleGit(targetPath);
+    const targetBranch = branch ?? (await git.raw(['branch', '--show-current'])).trim();
+    if (!targetBranch) throw new Error('Cannot push: HEAD is detached and no branch name was provided');
+    await git.push(remote, targetBranch, ['--set-upstream']);
+  }
+
   async getGitStatus(repo: Repo, worktreePath?: string | null): Promise<GitWorktreeStatus> {
     this.ensureGitRepo(repo);
     const targetPath = this.resolveWorkingDirectory(repo, worktreePath);

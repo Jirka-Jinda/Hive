@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
 import type { GitBranchOption, MdFile, Session, SessionBranchMode } from '../../api/client';
@@ -115,6 +115,8 @@ export default function SessionList() {
     const [branchSearch, setBranchSearch] = useState('');
     const [branchOptions, setBranchOptions] = useState<GitBranchOption[]>([]);
     const [branchesLoading, setBranchesLoading] = useState(false);
+    const [dragOverId, setDragOverId] = useState<number | null>(null);
+    const dragSessionId = useRef<number | null>(null);
 
     useEffect(() => {
         if (!selectedSession || !selectedRepo) { setSessionRefs([]); return; }
@@ -290,6 +292,48 @@ export default function SessionList() {
         } finally {
             setRestartingSessionId(null);
         }
+    };
+
+    const handleDragStart = (sessionId: number) => {
+        dragSessionId.current = sessionId;
+    };
+
+    const handleDragOver = (e: React.DragEvent, sessionId: number) => {
+        e.preventDefault();
+        setDragOverId(sessionId);
+    };
+
+    const handleDrop = async (e: React.DragEvent, targetId: number) => {
+        e.preventDefault();
+        setDragOverId(null);
+        const fromId = dragSessionId.current;
+        dragSessionId.current = null;
+        if (!fromId || fromId === targetId || !selectedRepo) return;
+
+        const sorted = [...sessions].sort((a, b) => a.sort_order - b.sort_order);
+        const fromIdx = sorted.findIndex((s) => s.id === fromId);
+        const toIdx = sorted.findIndex((s) => s.id === targetId);
+        if (fromIdx === -1 || toIdx === -1) return;
+
+        const reordered = [...sorted];
+        const [moved] = reordered.splice(fromIdx, 1);
+        reordered.splice(toIdx, 0, moved);
+        const orderedIds = reordered.map((s) => s.id);
+
+        // Optimistic update
+        setSessions(reordered.map((s, i) => ({ ...s, sort_order: i })));
+
+        try {
+            await api.repos.sessions.reorder(selectedRepo.id, orderedIds);
+        } catch {
+            // Revert on failure
+            setSessions(sorted);
+        }
+    };
+
+    const handleDragEnd = () => {
+        dragSessionId.current = null;
+        setDragOverId(null);
     };
 
     return (
@@ -479,10 +523,7 @@ export default function SessionList() {
             {!showNew && errorMsg && <p className="px-2 pb-2 text-xs text-red-400">{errorMsg}</p>}
 
             <ul className="space-y-0.5">
-                {[...sessions].sort((a, b) => {
-                    const order = { idle: 0, working: 1, stopped: 2 } as Record<string, number>;
-                    return (order[a.state ?? 'stopped'] ?? 2) - (order[b.state ?? 'stopped'] ?? 2);
-                }).map((session: Session) => {
+                {[...sessions].sort((a, b) => a.sort_order - b.sort_order).map((session: Session) => {
                     const isActive = selectedSession?.id === session.id;
                     const isEditing = editingSessionId === session.id;
                     const branchLabel = getSessionBranchLabel(session);
@@ -490,10 +531,17 @@ export default function SessionList() {
                     return (
                         <li
                             key={session.id}
+                            draggable
+                            onDragStart={() => handleDragStart(session.id)}
+                            onDragOver={(e) => handleDragOver(e, session.id)}
+                            onDrop={(e) => { void handleDrop(e, session.id); }}
+                            onDragEnd={handleDragEnd}
                             onClick={() => setSelectedSession(session)}
-                            className={`group rounded-lg border cursor-pointer text-sm ${isActive
-                                ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
-                                : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
+                            className={`group rounded-lg border cursor-pointer text-sm transition-all ${dragOverId === session.id
+                                ? 'border-orange-400/60 bg-orange-600/10 scale-[0.98]'
+                                : isActive
+                                    ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
+                                    : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
                                 }`}
                         >
                             <div className="px-2.5 py-2">

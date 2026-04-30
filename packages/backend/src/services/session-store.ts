@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { normalizeTerminalText } from '../utils/terminal-text';
 
 export type SessionBranchMode = 'new' | 'existing' | 'root';
 
@@ -13,6 +14,7 @@ export interface Session {
   branch_mode: SessionBranchMode | null;
   initial_branch_name: string | null;
   worktree_path: string | null;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +23,11 @@ export interface SessionWithGitStatus extends Session {
   current_branch: string | null;
   head_ref: string | null;
   is_detached: boolean;
+}
+
+export interface SessionLogChunk {
+  id: number;
+  output: Buffer;
 }
 
 export class SessionStore {
@@ -34,7 +41,7 @@ export class SessionStore {
 
   list(repoId: number): Session[] {
     return this.db
-      .prepare('SELECT * FROM sessions WHERE repo_id = ? ORDER BY created_at DESC')
+      .prepare('SELECT * FROM sessions WHERE repo_id = ? ORDER BY sort_order ASC, created_at DESC')
       .all(repoId) as Session[];
   }
 
@@ -53,9 +60,13 @@ export class SessionStore {
     initialBranchName?: string | null;
     worktreePath?: string | null;
   }): Session {
+    // Place new sessions at the top (sort_order = 0, shift others down)
+    this.db
+      .prepare('UPDATE sessions SET sort_order = sort_order + 1 WHERE repo_id = ?')
+      .run(input.repoId);
     const result = this.db
       .prepare(
-        'INSERT INTO sessions (repo_id, agent_type, name, credential_id, branch_mode, initial_branch_name, worktree_path) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO sessions (repo_id, agent_type, name, credential_id, branch_mode, initial_branch_name, worktree_path, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, 0)'
       )
       .run(
         input.repoId,
@@ -67,6 +78,18 @@ export class SessionStore {
         input.worktreePath ?? null,
       );
     return this.get(result.lastInsertRowid as number);
+  }
+
+  reorder(repoId: number, orderedIds: number[]): void {
+    const update = this.db.prepare(
+      "UPDATE sessions SET sort_order = ?, updated_at = datetime('now') WHERE id = ? AND repo_id = ?"
+    );
+    const tx = this.db.transaction(() => {
+      for (let i = 0; i < orderedIds.length; i++) {
+        update.run(i, orderedIds[i], repoId);
+      }
+    });
+    tx();
   }
 
   update(id: number, changes: { name?: string }): Session {
@@ -93,6 +116,12 @@ export class SessionStore {
       .run(state, id);
   }
 
+  stopRunningSessions(): void {
+    this.db
+      .prepare("UPDATE sessions SET status = 'stopped', state = 'stopped', updated_at = datetime('now') WHERE status = 'running'")
+      .run();
+  }
+
   updateGitMetadata(
     id: number,
     changes: {
@@ -116,24 +145,63 @@ export class SessionStore {
     return this.get(id);
   }
 
-  appendLog(sessionId: number, output: Buffer): void {
-    this.db
+  appendLog(sessionId: number, output: Buffer): number {
+    const result = this.db
       .prepare('INSERT INTO session_logs (session_id, output) VALUES (?, ?)')
       .run(sessionId, output);
+    const logId = result.lastInsertRowid as number;
+    // Strip terminal control sequences, then index human-readable text in FTS5.
+    const text = normalizeTerminalText(output.toString('utf8'))
+      .replace(/[^\S\r\n]+/g, ' ')
+      .trim();
+    if (text) {
+      this.db
+        .prepare('INSERT INTO session_logs_fts (text, log_id, session_id) VALUES (?, ?, ?)')
+        .run(text, logId, sessionId);
+    }
+    return logId;
   }
 
   clearLogs(sessionId: number): void {
     this.db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(sessionId);
+    this.db.prepare("DELETE FROM session_logs_fts WHERE session_id = ?").run(sessionId);
   }
 
   /** Returns last `limit` log chunks in chronological order for scrollback replay. */
   getLogs(sessionId: number, limit = 500): Buffer[] {
+    return this.getLogsThrough(sessionId, this.getLastLogId(sessionId), limit).map((r) => r.output);
+  }
+
+  getLastLogId(sessionId: number): number {
+    const row = this.db
+      .prepare('SELECT COALESCE(MAX(id), 0) AS id FROM session_logs WHERE session_id = ?')
+      .get(sessionId) as { id: number };
+    return row.id;
+  }
+
+  getLogsThrough(sessionId: number, throughId: number, limit = 500): SessionLogChunk[] {
+    if (throughId <= 0) return [];
     const rows = this.db
       .prepare(
-        'SELECT output FROM (SELECT output, id FROM session_logs WHERE session_id = ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC'
+        'SELECT id, output FROM (SELECT id, output FROM session_logs WHERE session_id = ? AND id <= ? ORDER BY id DESC LIMIT ?) ORDER BY id ASC'
       )
-      .all(sessionId, limit) as { output: Buffer }[];
-    return rows.map((r) => r.output);
+      .all(sessionId, throughId, limit) as SessionLogChunk[];
+    return rows;
+  }
+
+  /** Full-text search across logs for a session. Returns matching snippets. */
+  searchLogs(sessionId: number, query: string, limit = 50): { snippet: string; log_id: number }[] {
+    if (!query.trim()) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT snippet(session_logs_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet, log_id
+         FROM session_logs_fts
+         WHERE session_id = ? AND session_logs_fts MATCH ?
+         ORDER BY rank
+         LIMIT ?`
+      )
+      .all(sessionId, query.trim(), limit) as { snippet: string; log_id: number }[];
+    return rows;
   }
 
   delete(id: number): void {

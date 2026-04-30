@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   branch_mode   TEXT,
   initial_branch_name TEXT,
   worktree_path TEXT,
+  sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -48,6 +49,14 @@ CREATE TABLE IF NOT EXISTS session_logs (
   session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
   output     BLOB    NOT NULL,
   created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- FTS5 index over session_logs for full-text search (plain-text representation)
+CREATE VIRTUAL TABLE IF NOT EXISTS session_logs_fts USING fts5(
+  text,
+  log_id UNINDEXED,
+  session_id UNINDEXED,
+  tokenize='unicode61'
 );
 
 CREATE TABLE IF NOT EXISTS session_usage_totals (
