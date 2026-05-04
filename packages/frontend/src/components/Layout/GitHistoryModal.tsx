@@ -36,6 +36,7 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
     const [commitMsg, setCommitMsg] = useState('');
     const [committing, setCommitting] = useState(false);
     const [pushing, setPushing] = useState(false);
+    const [fetching, setFetching] = useState(false);
     const [actionError, setActionError] = useState('');
     const [lastCommit, setLastCommit] = useState('');
 
@@ -89,6 +90,19 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
             setActionError(e instanceof Error ? e.message : 'Push failed');
         } finally {
             setPushing(false);
+        }
+    };
+
+    const handleFetchPull = async () => {
+        setFetching(true);
+        setActionError('');
+        try {
+            await api.repos.git.fetchPull(repo.id, { sessionId });
+            await loadHistory();
+        } catch (e: unknown) {
+            setActionError(e instanceof Error ? e.message : 'Fetch & pull failed');
+        } finally {
+            setFetching(false);
         }
     };
 
@@ -151,6 +165,14 @@ export default function GitHistoryModal({ repo, session, onClose }: Props) {
                                 className="px-3 py-1.5 text-xs rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium border border-gray-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
                             >
                                 {pushing ? '…' : 'Push'}
+                            </button>
+                            <button
+                                onClick={() => { void handleFetchPull(); }}
+                                disabled={fetching}
+                                title={session ? `Fetch & pull ${session.current_branch ?? 'branch'}` : 'Fetch & pull main'}
+                                className="px-3 py-1.5 text-xs rounded-md bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium border border-gray-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                            >
+                                {fetching ? '…' : 'Fetch & Pull'}
                             </button>
                         </div>
                         {actionError && <p className="text-xs text-red-400">{actionError}</p>}

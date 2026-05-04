@@ -5,7 +5,7 @@ import { platform } from 'node:process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
-import { Config } from '../utils/config';
+import type { SettingsService } from '../services/settings-service';
 
 /**
  * Resolve the best available PowerShell on Windows.
@@ -58,7 +58,7 @@ function resolveWindowsShell(): string {
   return 'powershell.exe';
 }
 
-export function setupShellServer(wss: WebSocketServer): void {
+export function setupShellServer(wss: WebSocketServer, settingsService: SettingsService): void {
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '', 'http://localhost');
     const cols = Math.max(20, Math.min(500, parseInt(url.searchParams.get('cols') ?? '', 10) || 80));
@@ -68,7 +68,7 @@ export function setupShellServer(wss: WebSocketServer): void {
 
     // Start in the central-md/ directory — Copilot/Claude can directly edit
     // central MD files and cd ../repos to switch to the repos folder.
-    const centralMdDir = Config.CENTRAL_MD_DIR;
+    const centralMdDir = settingsService.load().centralMdDir;
     mkdirSync(centralMdDir, { recursive: true });
     const cwd = centralMdDir;
 

@@ -27,6 +27,7 @@ async function initGitRepo(repoPath: string): Promise<void> {
 
 describe('Git-backed session APIs', () => {
   const repoPath = join(testPaths.root, 'git-session-repo');
+  const remotePath = join(testPaths.root, 'git-session-remote.git');
   let repoId = 0;
   let newBranchSession: {
     id: number;
@@ -40,10 +41,28 @@ describe('Git-backed session APIs', () => {
     id: number;
     worktree_path: string | null;
   } = { id: 0, worktree_path: null };
+  let remoteBranchSession: {
+    id: number;
+    worktree_path: string;
+  };
   const repoSeedContent = '# Session seed\n\nUse this in the worktree.\n';
 
   beforeAll(async () => {
     await initGitRepo(repoPath);
+    await simpleGit().raw(['init', '--bare', remotePath]);
+    const git = simpleGit(repoPath);
+    await git.addRemote('origin', remotePath);
+    await git.push(['-u', 'origin', 'main']);
+    await git.push(['origin', 'existing-branch']);
+    await git.raw(['branch', '--set-upstream-to=origin/existing-branch', 'existing-branch']);
+    await git.checkoutLocalBranch('remote-only-branch');
+    writeFileSync(join(repoPath, 'remote-only.txt'), 'remote branch\n', 'utf8');
+    await git.add('.');
+    await git.commit('Remote-only branch commit');
+    await git.push(['-u', 'origin', 'remote-only-branch']);
+    await git.checkout('main');
+    await git.raw(['branch', '-D', 'remote-only-branch']);
+
     const res = await req(getApp(), '/api/repos', {
       method: 'POST',
       body: { path: repoPath, name: 'git-session-repo' },
@@ -154,6 +173,38 @@ describe('Git-backed session APIs', () => {
     );
   });
 
+  it('lists remote branches and creates a local tracking branch session from one', async () => {
+    const branchesRes = await req(getApp(), `/api/repos/${repoId}/git/branches?q=remote-only`);
+    expect(branchesRes.status).toBe(200);
+    const branches = await branchesRes.json();
+    expect(branches).toEqual([
+      expect.objectContaining({
+        name: 'origin/remote-only-branch',
+        in_use: false,
+        is_remote: true,
+      }),
+    ]);
+
+    const createRemoteBranch = await req(getApp(), `/api/repos/${repoId}/sessions`, {
+      method: 'POST',
+      body: {
+        name: 'Remote Branch Session',
+        agentType: 'claude',
+        branchMode: 'existing',
+        branchName: 'origin/remote-only-branch',
+      },
+    });
+    expect(createRemoteBranch.status).toBe(201);
+    const remoteBranchBody = await createRemoteBranch.json();
+    expect(remoteBranchBody.branch_mode).toBe('existing');
+    expect(remoteBranchBody.initial_branch_name).toBe('remote-only-branch');
+    expect(remoteBranchBody.current_branch).toBe('remote-only-branch');
+    expect(readFileSync(join(remoteBranchBody.worktree_path, 'remote-only.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe(
+      'remote branch\n',
+    );
+    remoteBranchSession = remoteBranchBody;
+  });
+
   it('marks attached branches as in use by the owning session', async () => {
     const res = await req(getApp(), `/api/repos/${repoId}/git/branches`);
     expect(res.status).toBe(200);
@@ -201,6 +252,71 @@ describe('Git-backed session APIs', () => {
         author_name: 'Test User',
       }),
     );
+  });
+
+  it('fetches and pulls from the current branch upstream', async () => {
+    const updaterPath = join(testPaths.root, 'git-session-remote-updater');
+    await simpleGit().clone(remotePath, updaterPath);
+    const updater = simpleGit(updaterPath);
+    await updater.addConfig('user.name', 'Remote User');
+    await updater.addConfig('user.email', 'remote@example.com');
+    await updater.checkout('remote-only-branch');
+    writeFileSync(join(updaterPath, 'remote-only.txt'), 'remote branch\nupstream update\n', 'utf8');
+    await updater.add('.');
+    await updater.commit('Update remote-only branch');
+    await updater.push('origin', 'remote-only-branch');
+
+    const pullRes = await req(getApp(), `/api/repos/${repoId}/git/fetch-pull`, {
+      method: 'POST',
+      body: { sessionId: remoteBranchSession.id },
+    });
+
+    expect(pullRes.status).toBe(200);
+    expect(readFileSync(join(remoteBranchSession.worktree_path, 'remote-only.txt'), 'utf8').replace(/\r\n/g, '\n')).toBe(
+      'remote branch\nupstream update\n',
+    );
+  });
+
+  it('returns JSON changed files and diffs for a session worktree', async () => {
+    writeFileSync(join(existingBranchSession.worktree_path, 'feature.txt'), 'existing branch\nchanged\n', 'utf8');
+    writeFileSync(join(existingBranchSession.worktree_path, 'new-file.txt'), 'new file\n', 'utf8');
+
+    const filesRes = await req(
+      getApp(),
+      `/api/repos/${repoId}/git/changed-files?sessionId=${existingBranchSession.id}`,
+    );
+    expect(filesRes.status).toBe(200);
+    expect(filesRes.headers.get('content-type')).toContain('application/json');
+    const files = await filesRes.json();
+    expect(files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'feature.txt', status: 'M' }),
+        expect.objectContaining({ path: 'new-file.txt', status: '?' }),
+      ]),
+    );
+
+    const diffRes = await req(
+      getApp(),
+      `/api/repos/${repoId}/git/diff?sessionId=${existingBranchSession.id}&path=feature.txt`,
+    );
+    expect(diffRes.status).toBe(200);
+    const diff = await diffRes.json();
+    expect(diff).toEqual(
+      expect.objectContaining({
+        path: 'feature.txt',
+        status: 'M',
+        original: 'existing branch\n',
+        modified: 'existing branch\nchanged\n',
+      }),
+    );
+  });
+
+  it('returns JSON for unmatched API routes', async () => {
+    const res = await req(getApp(), '/api/not-a-real-route');
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toContain('application/json');
+    expect(await res.json()).toEqual({ error: 'Not found' });
   });
 
   it('deletes only the targeted worktree and keeps the branch available', async () => {

@@ -61,7 +61,7 @@ process.on('unhandledRejection', (reason: unknown) => {
 const settingsService = new SettingsService();
 const notificationBus = new NotificationBus();
 const mdMgr = new MdFileManager(db);
-const centralMdSync = new CentralMdSyncService(mdMgr, notificationBus);
+const centralMdSync = new CentralMdSyncService(mdMgr, settingsService, notificationBus);
 mdMgr.setSyncService(centralMdSync);
 centralMdSync.fullSync();
 centralMdSync.startWatching();
@@ -116,18 +116,25 @@ app.route('/api/repos', reposRouter(workspace, mdRefService, pipelineRegistry));
 app.route('/api/credentials', credentialsRouter(credentialStore));
 app.route('/api/agents', agentsRouter());
 app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));
-app.route('/api/settings', settingsRouter(settingsService));
+app.route('/api/settings', settingsRouter(settingsService, centralMdSync));
 app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
 app.route('/api/tools', toolsRouter());
 app.route('/api/automation', automationRouter(automationService));
 app.route('/api/usage', usageRouter(usageService, repoManager));
 app.route('/api/logs', logsRouter(logService));
 
+// Keep API misses JSON-shaped. Without this, production SPA fallback can mask
+// a missing route as index.html and the frontend reports a content-type error.
+app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
+
 // Static frontend (production only)
 if (Config.NODE_ENV === 'production') {
   app.use('/*', serveStatic({ root: Config.STATIC_DIR }));
-  // SPA fallback
+  // SPA fallback: return JSON 404 for unmatched /api/* paths, index.html for everything else
   app.get('/*', (c) => {
+    if (c.req.path.startsWith('/api')) {
+      return c.json({ error: 'Not found' }, 404);
+    }
     try {
       const html = readFileSync(join(Config.STATIC_DIR, 'index.html'), 'utf-8');
       return c.html(html);
@@ -149,7 +156,7 @@ const shellWss = new WebSocketServer({ noServer: true });
 const notifyWss = new WebSocketServer({ noServer: true });
 
 setupWebSocketServer(termWss, sessionStore, repoManager, credentialStore, pipelineRegistry, notificationBus);
-setupShellServer(shellWss);
+setupShellServer(shellWss, settingsService);
 setupNotifyServer(notifyWss, notificationBus);
 
 // Re-discover repo md files whenever an agent session goes idle so that any

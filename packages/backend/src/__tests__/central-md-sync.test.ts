@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { migrate } from '../db/migrate';
 import { MdFileManager } from '../services/mdfile-manager';
 import { NotificationBus } from '../services/notification-bus';
+import { SettingsService } from '../services/settings-service';
 import { testPaths } from './api-test-support';
 
 const chokidarMock = vi.hoisted(() => {
@@ -37,9 +38,13 @@ describe('CentralMdSyncService', () => {
   let mdMgr: MdFileManager;
   let notificationBus: NotificationBus;
   let sync: CentralMdSyncService;
+  let savedCentralMdDir: string | undefined;
 
   beforeEach(() => {
     vi.useFakeTimers();
+    // Pin env var to the test temp dir so SettingsService returns the right path
+    savedCentralMdDir = process.env.CENTRAL_MD_DIR;
+    process.env.CENTRAL_MD_DIR = testPaths.central;
     mkdirSync(testPaths.central, { recursive: true });
     chokidarMock.handlers.clear();
     chokidarMock.watch.mockClear();
@@ -53,7 +58,7 @@ describe('CentralMdSyncService', () => {
 
     notificationBus = new NotificationBus();
     mdMgr = new MdFileManager(db);
-    sync = new CentralMdSyncService(mdMgr, notificationBus);
+    sync = new CentralMdSyncService(mdMgr, new SettingsService(), notificationBus);
     mdMgr.setSyncService(sync);
     sync.fullSync();
   });
@@ -61,6 +66,12 @@ describe('CentralMdSyncService', () => {
   afterEach(async () => {
     await sync.stopWatching();
     vi.useRealTimers();
+    // Restore the original env var value
+    if (savedCentralMdDir === undefined) {
+      delete process.env.CENTRAL_MD_DIR;
+    } else {
+      process.env.CENTRAL_MD_DIR = savedCentralMdDir;
+    }
     db.close();
   });
 

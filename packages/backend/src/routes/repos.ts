@@ -48,6 +48,11 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     return workspace.listGitBranches(parseIdParam(c, 'id'), c.req.query('q') ?? undefined);
   }, { errorStatus: 404 }));
 
+  app.post('/:id/git/fetch-remotes', (c) => jsonRoute(c, async () => {
+    await workspace.gitFetchRemotes(parseIdParam(c, 'id'));
+    return { ok: true };
+  }, { errorStatus: 404 }));
+
   app.get('/:id/git/status', (c) => jsonRoute(c, () => {
     return workspace.getGitStatus(
       parseIdParam(c, 'id'),
@@ -83,6 +88,29 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     const body = await c.req.json<{ sessionId?: number; remote?: string; branch?: string }>();
     return jsonRoute(c, () => workspace.gitPush(repoId, body.sessionId, body.remote, body.branch), { errorStatus: 400 });
   });
+
+  app.post('/:id/git/fetch-pull', async (c) => {
+    const repoId = parseIdParam(c, 'id');
+    const body = await c.req.json<{ sessionId?: number; remote?: string; branch?: string }>();
+    return jsonRoute(c, () => workspace.gitFetchAndPull(repoId, body.sessionId, body.remote, body.branch), { errorStatus: 400 });
+  });
+
+  app.get('/:id/git/changed-files', (c) => jsonRoute(c, () => {
+    return workspace.getChangedFiles(
+      parseIdParam(c, 'id'),
+      parseOptionalQueryId(c.req.query('sessionId'), 'sessionId'),
+    );
+  }, { errorStatus: 404 }));
+
+  app.get('/:id/git/diff', (c) => jsonRoute(c, () => {
+    const path = c.req.query('path');
+    if (!path?.trim()) return Promise.reject(new Error('path is required'));
+    return workspace.getFileDiff(
+      parseIdParam(c, 'id'),
+      path.trim(),
+      parseOptionalQueryId(c.req.query('sessionId'), 'sessionId'),
+    );
+  }, { errorStatus: 400 }));
 
   // --- Sessions sub-resource ---
   app.get('/:id/sessions', (c) => jsonRoute(c, () => workspace.listSessions(parseIdParam(c, 'id')), { errorStatus: 404 }));

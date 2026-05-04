@@ -100,6 +100,7 @@ export interface GitBranchOption {
   session_id: number | null;
   session_name: string | null;
   disabled_reason: string | null;
+  is_remote: boolean;
 }
 
 export interface GitStatus {
@@ -117,6 +118,20 @@ export interface GitHistoryEntry {
   author_name: string;
   authored_at: string;
   refs: string[];
+}
+
+export type GitChangeStatus = 'M' | 'A' | 'D' | 'R' | '?';
+
+export interface GitChangedFile {
+  path: string;
+  status: GitChangeStatus;
+}
+
+export interface GitFileDiff {
+  path: string;
+  status: GitChangeStatus;
+  original: string;
+  modified: string;
 }
 
 export interface Credential {
@@ -195,12 +210,16 @@ export interface UserActionLog {
 // Helper
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...options?.headers },
     ...options,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error((err as { error: string }).error ?? res.statusText);
+  }
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Unexpected response type "${contentType}" for ${path}`);
   }
   return res.json() as Promise<T>;
 }
@@ -279,6 +298,8 @@ export const api = {
           const qs = params.toString();
           return request<GitBranchOption[]>(`/repos/${repoId}/git/branches${qs ? `?${qs}` : ''}`);
         },
+        fetchRemotes: (repoId: number) =>
+          request<{ ok: boolean }>(`/repos/${repoId}/git/fetch-remotes`, { method: 'POST' }),
       },
       status: (repoId: number, sessionId?: number) => {
         const params = new URLSearchParams();
@@ -297,6 +318,19 @@ export const api = {
         request<{ commit: string }>(`/repos/${repoId}/git/commit`, { method: 'POST', body: JSON.stringify(body) }),
       push: (repoId: number, body: { sessionId?: number; remote?: string; branch?: string }) =>
         request<{ ok: boolean }>(`/repos/${repoId}/git/push`, { method: 'POST', body: JSON.stringify(body) }),
+      fetchPull: (repoId: number, body: { sessionId?: number; remote?: string; branch?: string }) =>
+        request<{ ok: boolean }>(`/repos/${repoId}/git/fetch-pull`, { method: 'POST', body: JSON.stringify(body) }),
+      changedFiles: (repoId: number, sessionId?: number) => {
+        const params = new URLSearchParams();
+        if (sessionId !== undefined) params.set('sessionId', String(sessionId));
+        const qs = params.toString();
+        return request<GitChangedFile[]>(`/repos/${repoId}/git/changed-files${qs ? `?${qs}` : ''}`);
+      },
+      diff: (repoId: number, path: string, sessionId?: number) => {
+        const params = new URLSearchParams({ path });
+        if (sessionId !== undefined) params.set('sessionId', String(sessionId));
+        return request<GitFileDiff>(`/repos/${repoId}/git/diff?${params.toString()}`);
+      },
     },
   },
 

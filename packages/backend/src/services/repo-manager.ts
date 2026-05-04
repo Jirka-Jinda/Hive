@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, rmdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 import simpleGit from 'simple-git';
 import type Database from 'better-sqlite3';
 import { Config } from '../utils/config';
@@ -41,6 +41,25 @@ export interface GitBranchOccupancy {
   in_use: boolean;
   worktree_path: string | null;
   is_main_worktree: boolean;
+}
+
+export interface CreatedWorktree {
+  path: string;
+  branch: string;
+}
+
+export type GitChangeStatus = 'M' | 'A' | 'D' | 'R' | '?';
+
+export interface GitChangedFile {
+  path: string;
+  status: GitChangeStatus;
+}
+
+export interface GitFileDiff {
+  path: string;
+  status: GitChangeStatus;
+  original: string;
+  modified: string;
 }
 
 interface RepoRow {
@@ -233,6 +252,42 @@ export class RepoManager {
       .sort((left, right) => left.localeCompare(right));
   }
 
+  async listRemoteBranches(repo: Repo, query?: string): Promise<{ fullName: string; localName: string }[]> {
+    this.ensureGitRepo(repo);
+    const git = simpleGit(repo.path);
+    const output = await git.raw(['branch', '-r', '--format=%(refname:short)']);
+    const needle = query?.trim().toLowerCase() ?? '';
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.endsWith('/HEAD'))
+      .map((fullName) => ({ fullName, localName: fullName.replace(/^[^/]+\//, '') }))
+      .filter(({ fullName, localName }) => !needle || fullName.toLowerCase().includes(needle) || localName.toLowerCase().includes(needle))
+      .sort((a, b) => a.localName.localeCompare(b.localName));
+  }
+
+  private findRemoteBranch(
+    remoteBranches: { fullName: string; localName: string }[],
+    branchName: string,
+  ): { fullName: string; localName: string } | null {
+    const exact = remoteBranches.find((branch) => branch.fullName === branchName);
+    if (exact) return exact;
+
+    const localMatches = remoteBranches.filter((branch) => branch.localName === branchName);
+    if (localMatches.length === 1) return localMatches[0]!;
+
+    return localMatches.find((branch) => branch.fullName.startsWith('origin/')) ?? null;
+  }
+
+  async fetchRemotes(repo: Repo): Promise<void> {
+    this.ensureGitRepo(repo);
+    try {
+      await simpleGit(repo.path).raw(['fetch', '--all', '--prune', '--no-tags', '--quiet']);
+    } catch {
+      // Best-effort; ignore errors (no network, auth failure, no remotes).
+    }
+  }
+
   async listWorktrees(repo: Repo): Promise<GitWorktreeInfo[]> {
     this.ensureGitRepo(repo);
     const output = await simpleGit(repo.path).raw(['worktree', 'list', '--porcelain']);
@@ -259,7 +314,7 @@ export class RepoManager {
     sessionId: number,
     branchMode: WorktreeBranchMode,
     branchName: string,
-  ): Promise<string> {
+  ): Promise<CreatedWorktree> {
     this.ensureGitRepo(repo);
     const normalizedBranch = await this.validateBranchName(repo, branchName);
     const git = simpleGit(repo.path);
@@ -268,17 +323,28 @@ export class RepoManager {
 
     const localBranches = await git.branchLocal();
     const branchExists = localBranches.all.includes(normalizedBranch);
+    const remoteBranches = branchMode === 'existing' ? await this.listRemoteBranches(repo) : [];
+    const remoteBranch = branchMode === 'existing' ? this.findRemoteBranch(remoteBranches, normalizedBranch) : null;
     const occupancy = await this.listBranchOccupancy(repo);
-    const branchInUse = occupancy.get(normalizedBranch);
 
     if (branchMode === 'new' && branchExists) {
       throw new Error(`Branch \"${normalizedBranch}\" already exists`);
     }
-    if (branchMode === 'existing' && !branchExists) {
-      throw new Error(`Branch \"${normalizedBranch}\" does not exist locally`);
+
+    let effectiveBranch = normalizedBranch;
+    let remoteCheckout: { fullName: string; localName: string } | null = null;
+    if (branchMode === 'existing' && !branchExists && remoteBranch) {
+      effectiveBranch = remoteBranch.localName;
+      if (!localBranches.all.includes(remoteBranch.localName)) {
+        remoteCheckout = remoteBranch;
+      }
+    } else if (branchMode === 'existing' && !branchExists) {
+      throw new Error(`Branch "${normalizedBranch}" does not exist locally`);
     }
+
+    const branchInUse = occupancy.get(effectiveBranch);
     if (branchInUse) {
-      throw new Error(`Branch \"${normalizedBranch}\" is already checked out in ${branchInUse.worktree_path}`);
+      throw new Error(`Branch "${effectiveBranch}" is already checked out in ${branchInUse.worktree_path}`);
     }
 
     const worktreePath = this.buildManagedWorktreePath(repo.id, sessionId);
@@ -290,8 +356,16 @@ export class RepoManager {
     try {
       if (branchMode === 'new') {
         await git.raw(['worktree', 'add', '-b', normalizedBranch, worktreePath, 'HEAD']);
+      } else if (remoteCheckout) {
+        await git.raw(['worktree', 'add', '-b', remoteCheckout.localName, worktreePath, remoteCheckout.fullName]);
+        await simpleGit(worktreePath).raw([
+          'branch',
+          '--set-upstream-to',
+          remoteCheckout.fullName,
+          remoteCheckout.localName,
+        ]);
       } else {
-        await git.raw(['worktree', 'add', worktreePath, normalizedBranch]);
+        await git.raw(['worktree', 'add', worktreePath, effectiveBranch]);
       }
     } catch (error) {
       try {
@@ -309,6 +383,13 @@ export class RepoManager {
           // Best effort rollback only.
         }
       }
+      if (remoteCheckout) {
+        try {
+          await git.raw(['branch', '-D', effectiveBranch]);
+        } catch {
+          // Best effort rollback only.
+        }
+      }
 
       try {
         await git.raw(['worktree', 'prune']);
@@ -319,7 +400,7 @@ export class RepoManager {
       throw error;
     }
 
-    return resolve(worktreePath);
+    return { path: resolve(worktreePath), branch: effectiveBranch };
   }
 
   async removeSessionWorktree(repo: Repo, worktreePath: string | null): Promise<void> {
@@ -396,6 +477,40 @@ export class RepoManager {
     await git.push(remote, targetBranch, ['--set-upstream']);
   }
 
+  async fetchAndPull(repo: Repo, worktreePath: string | null, remote = 'origin', branch?: string): Promise<void> {
+    this.ensureGitRepo(repo);
+    const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
+    const git = simpleGit(targetPath);
+    await git.raw(['fetch', remote, '--prune']);
+    const targetBranch = branch?.trim() || (await git.raw(['branch', '--show-current'])).trim();
+    if (!targetBranch) throw new Error('Cannot pull: HEAD is detached and no branch name was provided');
+
+    if (branch?.trim()) {
+      await git.pull(remote, targetBranch);
+      return;
+    }
+
+    let upstream = '';
+    try {
+      upstream = (await git.raw(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).trim();
+    } catch {
+      upstream = '';
+    }
+
+    if (!upstream) {
+      await git.pull(remote, targetBranch);
+      return;
+    }
+
+    const slashIndex = upstream.indexOf('/');
+    if (slashIndex <= 0 || slashIndex === upstream.length - 1) {
+      await git.pull(remote, targetBranch);
+      return;
+    }
+
+    await git.pull(upstream.slice(0, slashIndex), upstream.slice(slashIndex + 1));
+  }
+
   async getGitStatus(repo: Repo, worktreePath?: string | null): Promise<GitWorktreeStatus> {
     this.ensureGitRepo(repo);
     const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
@@ -446,6 +561,75 @@ export class RepoManager {
             .filter(Boolean),
         } satisfies GitHistoryEntry;
       });
+  }
+
+  async getChangedFiles(repo: Repo, worktreePath?: string | null): Promise<GitChangedFile[]> {
+    this.ensureGitRepo(repo);
+    const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
+    if (!existsSync(targetPath)) return [];
+
+    const git = simpleGit(targetPath);
+    const output = await git.raw(['status', '--porcelain', '-u']);
+    return output
+      .split('\n')
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .map((line) => {
+        const xy = line.slice(0, 2);
+        const rawPath = line.slice(3);
+        // Rename lines: "old -> new" — take the destination
+        const path = rawPath.includes(' -> ') ? rawPath.split(' -> ')[1] : rawPath;
+        const indexStatus = xy[0].trim();
+        const workStatus = xy[1].trim();
+        let status: GitChangeStatus;
+        if (workStatus === '?' || indexStatus === '?') status = '?';
+        else if (workStatus === 'D' || indexStatus === 'D') status = 'D';
+        else if (workStatus === 'A' || indexStatus === 'A') status = 'A';
+        else if (xy[0] === 'R') status = 'R';
+        else status = 'M';
+        return { path, status };
+      });
+  }
+
+  async getFileDiff(repo: Repo, filePath: string, worktreePath?: string | null): Promise<GitFileDiff> {
+    this.ensureGitRepo(repo);
+    const targetPath = this.resolveWorkingDirectory(repo, worktreePath);
+
+    // Security: ensure filePath is relative and stays within the worktree
+    const absFile = resolve(targetPath, filePath);
+    const rel = relative(targetPath, absFile);
+    if (!rel || rel.startsWith('..') || rel.includes('\0')) {
+      throw new Error('Invalid file path');
+    }
+
+    const git = simpleGit(targetPath);
+
+    // Determine status for this file
+    const changed = await this.getChangedFiles(repo, worktreePath);
+    const entry = changed.find((f) => f.path === filePath || f.path === rel);
+    const status: GitChangeStatus = entry?.status ?? 'M';
+
+    // Original: HEAD version (empty for untracked/added files)
+    let original = '';
+    if (status !== 'A' && status !== '?') {
+      try {
+        original = await git.show([`HEAD:${rel.replace(/\\/g, '/')}`]);
+      } catch {
+        original = '';
+      }
+    }
+
+    // Modified: working tree version (empty for deleted files)
+    let modified = '';
+    if (status !== 'D') {
+      try {
+        modified = readFileSync(absFile, 'utf8');
+      } catch {
+        modified = '';
+      }
+    }
+
+    return { path: rel.replace(/\\/g, '/'), status, original, modified };
   }
 
   list(): Repo[] {

@@ -47,6 +47,7 @@ import { WorkspaceService } from '../application/workspace-service';
 import { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { createTokenUsageNode } from '../pipeline/nodes/token-usage.node';
 import { LogService } from '../services/log-service';
+import { CentralMdSyncService } from '../services/central-md-sync';
 
 export const testPaths = {
   root: TEST_DATA_DIR,
@@ -62,6 +63,7 @@ function makeTestApp() {
 
   const mdMgr = new MdFileManager(db);
   const settingsService = new SettingsService();
+  const centralMdSync = new CentralMdSyncService(mdMgr, settingsService);
   const sessionStore = new SessionStore(db);
   const repoManager = new RepoManager(db, settingsService);
   const credentialStore = new CredentialStore(db);
@@ -85,10 +87,11 @@ function makeTestApp() {
   app.route('/api/agents', agentsRouter());
   app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));
   app.route('/api/usage', usageRouter(usageService, repoManager));
-  app.route('/api/settings', settingsRouter(settingsService));
+  app.route('/api/settings', settingsRouter(settingsService, centralMdSync));
   app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
   app.route('/api/tools', toolsRouter());
   app.route('/api/automation', automationRouter(automationService));
+  app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
   return app;
 }
 

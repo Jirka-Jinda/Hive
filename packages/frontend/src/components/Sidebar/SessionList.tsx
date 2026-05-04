@@ -51,27 +51,39 @@ function RefreshIcon({ spinning = false }: { spinning?: boolean }) {
     );
 }
 
+function DiffIcon() {
+    return (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+    );
+}
+
 function ActionButton({
     title,
     onClick,
     children,
     tone = 'default',
     disabled = false,
+    active = false,
 }: {
     title: string;
     onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
     children: React.ReactNode;
     tone?: 'default' | 'danger';
     disabled?: boolean;
+    active?: boolean;
 }) {
     return (
         <button
             onClick={onClick}
             disabled={disabled}
             aria-label={title}
-            className={`inline-flex items-center justify-center w-6 h-6 rounded-md shrink-0 transition-all ${tone === 'danger'
-                ? 'bg-red-950/20 text-red-200 hover:bg-red-800/60 hover:text-white'
-                : 'bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-orange-600/35 hover:text-white hover:ring-orange-500/30'
+            className={`inline-flex items-center justify-center w-6 h-6 rounded-md shrink-0 transition-all ${active
+                ? 'bg-orange-600/30 ring-1 ring-orange-500/40 text-orange-100 shadow-sm shadow-orange-950/40'
+                : tone === 'danger'
+                    ? 'bg-red-950/20 text-red-200 hover:bg-red-800/60 hover:text-white'
+                    : 'bg-black/20 ring-1 ring-black/10 text-white/90 hover:bg-orange-600/35 hover:text-white hover:ring-orange-500/30'
                 } disabled:opacity-40 disabled:cursor-not-allowed`}
             title={title}
         >
@@ -91,6 +103,8 @@ export default function SessionList() {
         updateSession,
         bumpSessionTerminalVersion,
         mdFiles,
+        activeDiffTarget,
+        toggleDiffTarget,
     } = useAppStore();
 
     const [showNew, setShowNew] = useState(false);
@@ -115,6 +129,8 @@ export default function SessionList() {
     const [branchSearch, setBranchSearch] = useState('');
     const [branchOptions, setBranchOptions] = useState<GitBranchOption[]>([]);
     const [branchesLoading, setBranchesLoading] = useState(false);
+    const [fetchingRemotes, setFetchingRemotes] = useState(false);
+    const [branchReloadKey, setBranchReloadKey] = useState(0);
     const [dragOverId, setDragOverId] = useState<number | null>(null);
     const dragSessionId = useRef<number | null>(null);
 
@@ -124,6 +140,18 @@ export default function SessionList() {
             .then(setSessionRefs)
             .catch(() => setSessionRefs([]));
     }, [selectedSession?.id, selectedRepo?.id]);
+
+    // Trigger a remote fetch once when the user switches to "existing" mode
+    useEffect(() => {
+        if (!selectedRepo?.is_git_repo || !showNew || branchMode !== 'existing') return;
+        setFetchingRemotes(true);
+        api.repos.git.branches.fetchRemotes(selectedRepo.id)
+            .catch(() => { /* best-effort */ })
+            .finally(() => {
+                setFetchingRemotes(false);
+                setBranchReloadKey((value) => value + 1);
+            });
+    }, [branchMode, selectedRepo?.id, selectedRepo?.is_git_repo, showNew]);
 
     useEffect(() => {
         if (!selectedRepo?.is_git_repo || !showNew || branchMode !== 'existing') {
@@ -148,7 +176,7 @@ export default function SessionList() {
         return () => {
             cancelled = true;
         };
-    }, [branchMode, branchSearch, selectedRepo?.id, selectedRepo?.is_git_repo, showNew]);
+    }, [branchMode, branchReloadKey, branchSearch, selectedRepo?.id, selectedRepo?.is_git_repo, showNew]);
 
     if (!selectedRepo) return null;
 
@@ -161,6 +189,8 @@ export default function SessionList() {
         setBranchName('');
         setBranchSearch('');
         setBranchOptions([]);
+        setFetchingRemotes(false);
+        setBranchReloadKey(0);
     };
 
     const refreshSessions = async () => {
@@ -452,14 +482,16 @@ export default function SessionList() {
                                 <div className="space-y-2">
                                     <input
                                         className="w-full bg-gray-900 border border-gray-700 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500/30 transition-all"
-                                        placeholder="Search existing branch"
+                                        placeholder={fetchingRemotes ? 'Fetching remote branches…' : 'Search local & remote branches'}
                                         value={branchSearch}
                                         onChange={(e) => setBranchSearch(e.target.value)}
                                     />
-                                    {branchesLoading ? (
-                                        <p className="text-xs text-gray-500">Loading branches…</p>
+                                    {branchesLoading || fetchingRemotes ? (
+                                        <p className="text-xs text-gray-500">{fetchingRemotes ? 'Fetching remote branches…' : 'Loading branches…'}</p>
+                                    ) : branchOptions.length === 0 && branchSearch.trim() ? (
+                                        <p className="text-xs text-gray-500">No branches match this filter.</p>
                                     ) : branchOptions.length === 0 ? (
-                                        <p className="text-xs text-gray-500">No local branches match this filter.</p>
+                                        <p className="text-xs text-gray-500">No local or remote branches are available.</p>
                                     ) : (
                                         <ul className="space-y-1 max-h-40 overflow-y-auto">
                                             {branchOptions.map((branch) => {
@@ -480,9 +512,11 @@ export default function SessionList() {
                                                             <div className="flex items-center justify-between gap-2">
                                                                 <span className="font-medium truncate">{branch.name}</span>
                                                                 {branch.in_use ? (
-                                                                    <span className="text-[10px] uppercase tracking-wider text-red-300">In use</span>
+                                                                    <span className="text-[10px] uppercase tracking-wider text-red-300 shrink-0">In use</span>
+                                                                ) : branch.is_remote ? (
+                                                                    <span className="text-[10px] uppercase tracking-wider text-sky-400 shrink-0">Remote</span>
                                                                 ) : isSelected ? (
-                                                                    <span className="text-[10px] uppercase tracking-wider text-orange-200">Selected</span>
+                                                                    <span className="text-[10px] uppercase tracking-wider text-orange-200 shrink-0">Selected</span>
                                                                 ) : null}
                                                             </div>
                                                         </button>
@@ -525,6 +559,9 @@ export default function SessionList() {
             <ul className="space-y-0.5">
                 {[...sessions].sort((a, b) => a.sort_order - b.sort_order).map((session: Session) => {
                     const isActive = selectedSession?.id === session.id;
+                    const isDiffActive =
+                        activeDiffTarget?.repoId === selectedRepo.id &&
+                        activeDiffTarget.sessionId === session.id;
                     const isEditing = editingSessionId === session.id;
                     const branchLabel = getSessionBranchLabel(session);
                     const stateMeta = getSessionStateMeta(session.state);
@@ -536,7 +573,7 @@ export default function SessionList() {
                             onDragOver={(e) => handleDragOver(e, session.id)}
                             onDrop={(e) => { void handleDrop(e, session.id); }}
                             onDragEnd={handleDragEnd}
-                            onClick={() => setSelectedSession(session)}
+                            onClick={() => setSelectedSession(isActive ? null : session)}
                             className={`group rounded-lg border cursor-pointer text-sm transition-all ${dragOverId === session.id
                                 ? 'border-orange-400/60 bg-orange-600/10 scale-[0.98]'
                                 : isActive
@@ -570,6 +607,21 @@ export default function SessionList() {
                                         {session.agent_type}
                                     </span>
                                     <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                        <ActionButton
+                                            title={selectedRepo.is_git_repo
+                                                ? isDiffActive
+                                                    ? 'Hide file diffs'
+                                                    : 'View file diffs'
+                                                : 'File diffs require a git repository'}
+                                            disabled={!selectedRepo.is_git_repo}
+                                            active={isDiffActive}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleDiffTarget(selectedRepo.id, session.id);
+                                            }}
+                                        >
+                                            <DiffIcon />
+                                        </ActionButton>
                                         <ActionButton
                                             title="Restart session"
                                             disabled={restartingSessionId === session.id}

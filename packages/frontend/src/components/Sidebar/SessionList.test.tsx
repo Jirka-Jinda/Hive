@@ -21,6 +21,7 @@ const apiMock = vi.hoisted(() => ({
     git: {
       branches: {
         list: vi.fn(),
+        fetchRemotes: vi.fn(),
       },
     },
   },
@@ -167,6 +168,7 @@ describe('SessionList', () => {
       updated_at: '2026-04-27T00:00:00Z',
     });
     apiMock.repos.sessions.list.mockResolvedValue([]);
+    apiMock.repos.git.branches.fetchRemotes.mockResolvedValue({ ok: true });
     apiMock.repos.git.branches.list.mockResolvedValue([
       {
         name: 'existing-branch',
@@ -176,6 +178,7 @@ describe('SessionList', () => {
         session_id: 99,
         session_name: 'Taken Session',
         disabled_reason: 'Already in use by session Taken Session',
+        is_remote: false,
       },
       {
         name: 'available-branch',
@@ -185,6 +188,17 @@ describe('SessionList', () => {
         session_id: null,
         session_name: null,
         disabled_reason: null,
+        is_remote: false,
+      },
+      {
+        name: 'origin/remote-branch',
+        in_use: false,
+        worktree_path: null,
+        is_main_worktree: false,
+        session_id: null,
+        session_name: null,
+        disabled_reason: null,
+        is_remote: true,
       },
     ]);
   });
@@ -203,6 +217,24 @@ describe('SessionList', () => {
     });
     expect(useAppStore.getState().sessionTerminalVersions[11]).toBe(1);
     expect(useAppStore.getState().selectedSession?.status).toBe('stopped');
+  });
+
+  it('toggles the active diff target from a session row', async () => {
+    const user = userEvent.setup();
+    render(<SessionList />);
+    const row = screen.getByText('Alpha Session').closest('li');
+
+    expect(row).not.toBeNull();
+
+    await user.click(within(row!).getByRole('button', { name: 'View file diffs' }));
+
+    expect(useAppStore.getState().activeDiffTarget).toEqual({ repoId: 1, sessionId: 11 });
+    expect(useAppStore.getState().activeView).toBe('diff');
+
+    await user.click(within(row!).getByRole('button', { name: 'Hide file diffs' }));
+
+    expect(useAppStore.getState().activeDiffTarget).toBeNull();
+    expect(useAppStore.getState().activeView).toBe('terminal');
   });
 
   it('updates the active session name and context refs', async () => {
@@ -345,11 +377,13 @@ describe('SessionList', () => {
     await user.click(screen.getByRole('button', { name: 'Existing branch' }));
 
     await waitFor(() => {
+      expect(apiMock.repos.git.branches.fetchRemotes).toHaveBeenCalledWith(1);
       expect(apiMock.repos.git.branches.list).toHaveBeenCalledWith(1, undefined);
     });
 
     expect(screen.getByRole('button', { name: 'existing-branch In use' })).toBeDisabled();
     expect(screen.getByText('Already in use by session Taken Session')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'origin/remote-branch Remote' })).toBeInTheDocument();
 
     await user.type(screen.getByPlaceholderText('Session name'), 'Existing Branch Session');
     await user.selectOptions(screen.getAllByRole('combobox')[0], 'claude');

@@ -12,6 +12,7 @@ export function resetAppStore(partial: Partial<ReturnType<typeof useAppStore.get
     mdFiles: [],
     selectedMdFile: null,
     activeView: 'terminal',
+    activeDiffTarget: null,
     settings: null,
     notifications: [],
     repoAlerts: {},

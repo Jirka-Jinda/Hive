@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import type { Repo, Session, Agent, Credential, MdFile, AppSettings } from '../api/client';
 
+export type ActiveView = 'terminal' | 'editor' | 'diff';
+
+export interface GitDiffTarget {
+  repoId: number;
+  sessionId: number;
+}
+
 export interface AppNotification {
   id: string;
   sessionId: number;
@@ -20,7 +27,8 @@ interface AppState {
   credentials: Credential[];
   mdFiles: MdFile[];
   selectedMdFile: (MdFile & { content: string }) | null;
-  activeView: 'terminal' | 'editor';
+  activeView: ActiveView;
+  activeDiffTarget: GitDiffTarget | null;
   settings: AppSettings | null;
   notifications: AppNotification[];
   /** repoId → count of unread "agent idle" alerts for sessions in that repo */
@@ -38,7 +46,9 @@ interface AppState {
   setCredentials: (credentials: Credential[]) => void;
   setMdFiles: (files: MdFile[]) => void;
   setSelectedMdFile: (file: (MdFile & { content: string }) | null) => void;
-  setActiveView: (view: 'terminal' | 'editor') => void;
+  setActiveView: (view: ActiveView) => void;
+  setActiveDiffTarget: (target: GitDiffTarget | null) => void;
+  toggleDiffTarget: (repoId: number, sessionId: number) => void;
   setSettings: (settings: AppSettings) => void;
   updateSessionState: (sessionId: number, state: Session['state'], sessionName: string, repoId?: number) => void;
   pushNotification: (notification: AppNotification) => void;
@@ -59,6 +69,7 @@ export const useAppStore = create<AppState>((set) => ({
   mdFiles: [],
   selectedMdFile: null,
   activeView: 'terminal',
+  activeDiffTarget: null,
   settings: null,
   notifications: [],
   repoAlerts: {},
@@ -69,7 +80,7 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const selectedMdFile =
         state.selectedMdFile?.scope === 'repo' ? null : state.selectedMdFile;
-      const activeView: 'terminal' | 'editor' = selectedMdFile ? 'editor' : 'terminal';
+      const activeView: ActiveView = selectedMdFile ? 'editor' : 'terminal';
 
       return {
         selectedRepo: repo,
@@ -78,6 +89,7 @@ export const useAppStore = create<AppState>((set) => ({
         mdFiles: state.mdFiles.filter((file) => file.scope !== 'repo'),
         selectedMdFile,
         activeView,
+        activeDiffTarget: null,
       };
     }),
   updateRepo: (repo) =>
@@ -85,7 +97,26 @@ export const useAppStore = create<AppState>((set) => ({
       repos: state.repos.map((existing) => (existing.id === repo.id ? repo : existing)),
       selectedRepo: state.selectedRepo?.id === repo.id ? repo : state.selectedRepo,
     })),
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) =>
+    set((state) => {
+      const target = state.activeDiffTarget;
+      if (
+        !target ||
+        sessions.some(
+          (session) =>
+            session.id === target.sessionId &&
+            session.repo_id === target.repoId,
+        )
+      ) {
+        return { sessions };
+      }
+
+      return {
+        sessions,
+        activeDiffTarget: null,
+        activeView: state.activeView === 'diff' ? 'terminal' : state.activeView,
+      };
+    }),
   setSelectedSession: (session) =>
     set({ selectedSession: session, activeView: 'terminal' }),
   updateSession: (session) =>
@@ -105,7 +136,34 @@ export const useAppStore = create<AppState>((set) => ({
   setMdFiles: (files) => set({ mdFiles: files }),
   setSelectedMdFile: (file) =>
     set({ selectedMdFile: file, activeView: file ? 'editor' : 'terminal' }),
-  setActiveView: (view) => set({ activeView: view }),
+  setActiveView: (view) =>
+    set((state) => {
+      if (view === 'diff' && !state.activeDiffTarget) return {};
+      return { activeView: view };
+    }),
+  setActiveDiffTarget: (target) =>
+    set((state) => ({
+      activeDiffTarget: target,
+      activeView: target ? 'diff' : state.activeView === 'diff' ? 'terminal' : state.activeView,
+    })),
+  toggleDiffTarget: (repoId, sessionId) =>
+    set((state) => {
+      const sameTarget =
+        state.activeDiffTarget?.repoId === repoId &&
+        state.activeDiffTarget.sessionId === sessionId;
+
+      if (sameTarget) {
+        return {
+          activeDiffTarget: null,
+          activeView: state.activeView === 'diff' ? 'terminal' : state.activeView,
+        };
+      }
+
+      return {
+        activeDiffTarget: { repoId, sessionId },
+        activeView: 'diff',
+      };
+    }),
   setSettings: (settings) => set({ settings }),
 
   updateSessionState: (sessionId, state, sessionName, repoId) =>

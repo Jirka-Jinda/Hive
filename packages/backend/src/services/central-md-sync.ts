@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
-import { Config } from '../utils/config';
+import type { SettingsService } from './settings-service';
 import type { MdFileManager, MdFile } from './mdfile-manager';
 import type { NotificationBus } from './notification-bus';
 
@@ -25,16 +25,19 @@ import type { NotificationBus } from './notification-bus';
  * inline by MdFileManager for real-time sync.
  */
 export class CentralMdSyncService {
-  private readonly dir: string;
   private watcher: FSWatcher | null = null;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private mdMgr: MdFileManager,
+    private settings: SettingsService,
     private notificationBus?: NotificationBus,
   ) {
-    this.dir = Config.CENTRAL_MD_DIR;
     mkdirSync(this.dir, { recursive: true });
+  }
+
+  private get dir(): string {
+    return this.settings.load().centralMdDir;
   }
 
   startWatching(): void {
@@ -74,6 +77,14 @@ export class CentralMdSyncService {
       await this.watcher.close();
       this.watcher = null;
     }
+  }
+
+  /** Call after centralMdDir setting changes to re-sync and restart the watcher. */
+  async restartWithNewDir(): Promise<void> {
+    await this.stopWatching();
+    mkdirSync(this.dir, { recursive: true });
+    this.fullSync();
+    this.startWatching();
   }
 
   private scheduleSync(): void {

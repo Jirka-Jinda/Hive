@@ -56,8 +56,14 @@ export function mdfilesRouter(mdMgr: MdFileManager, workspace: WorkspaceService,
         filename?: string;
         type?: MdFile['type'];
       }>();
+      const { file: before } = mdMgr.read(id);
       const updated = mdMgr.update(id, body);
       if (updated.scope === 'repo' && updated.repo_id !== null) {
+        // If the filename changed, remove the old file from disk in the main repo and all worktrees
+        // so that rediscovery doesn't re-import the old path as a new entry.
+        if (body.filename !== undefined && before.path !== updated.path) {
+          workspace.deleteRepoFileFromAllWorktrees(updated.repo_id, before.path);
+        }
         void workspace.syncRepoFilesToAllWorktrees(updated.repo_id);
       }
       return c.json(updated);

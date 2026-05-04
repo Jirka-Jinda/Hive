@@ -6,7 +6,7 @@ import type { CredentialStore } from '../services/credential-store';
 import type { MdFileManager } from '../services/mdfile-manager';
 import { killProcessAndWait } from '../services/process-manager';
 import { RepoManager } from '../services/repo-manager';
-import type { GitHistoryEntry, GitWorktreeStatus, Repo } from '../services/repo-manager';
+import type { GitChangedFile, GitFileDiff, GitHistoryEntry, GitWorktreeStatus, Repo } from '../services/repo-manager';
 import { SessionStore } from '../services/session-store';
 import type { Session, SessionBranchMode, SessionWithGitStatus } from '../services/session-store';
 import type { SettingsService } from '../services/settings-service';
@@ -31,6 +31,7 @@ export interface SessionBranchAvailability {
   session_id: number | null;
   session_name: string | null;
   disabled_reason: string | null;
+  is_remote: boolean;
 }
 
 export interface AgentMdWatchRoot {
@@ -238,6 +239,21 @@ export class WorkspaceService {
     this.logService?.logUserAction('git_push', `Pushed in repo "${repo.name}"${sessionId !== undefined ? ` (session ${sessionId})` : ''}`);
   }
 
+  async gitFetchAndPull(repoId: number, sessionId: number | undefined, remote?: string, branch?: string): Promise<{ ok: boolean }> {
+    const repo = this.repoManager.get(repoId);
+    const worktreePath = sessionId !== undefined
+      ? this.sessionStore.get(sessionId).worktree_path
+      : null;
+    await this.repoManager.fetchAndPull(repo, worktreePath, remote, branch);
+    this.logService?.logUserAction('git_fetch_pull', `Fetched and pulled in repo "${repo.name}"${sessionId !== undefined ? ` (session ${sessionId})` : ''}`);
+    return { ok: true };
+  }
+
+  async gitFetchRemotes(repoId: number): Promise<void> {
+    const repo = this.repoManager.get(repoId);
+    await this.repoManager.fetchRemotes(repo);
+  }
+
   searchSessionLogs(repoId: number, sessionId: number, query: string): { snippet: string; log_id: number }[] {
     this.repoManager.get(repoId); // validates repo exists
     const session = this.sessionStore.get(sessionId);
@@ -326,15 +342,20 @@ export class WorkspaceService {
 
       try {
         if (repo.is_git_repo && branchMode && branchMode !== 'root' && initialBranchName) {
-          createdWorktreePath = await this.repoManager.createSessionWorktree(
+          const worktree = await this.repoManager.createSessionWorktree(
             repo,
             session.id,
             branchMode,
             initialBranchName,
           );
+          createdWorktreePath = typeof worktree === 'string' ? worktree : worktree.path;
+          const resolvedInitialBranchName = typeof worktree === 'string' ? initialBranchName : worktree.branch;
           const repoFiles = this.snapshotRepoMdFiles(repo.id);
           if (repoFiles.length > 0) this.syncRepoFilesToWorktree(repo.id, createdWorktreePath, repoFiles);
-          const updated = this.sessionStore.updateGitMetadata(session.id, { worktreePath: createdWorktreePath });
+          const updated = this.sessionStore.updateGitMetadata(session.id, {
+            initialBranchName: resolvedInitialBranchName,
+            worktreePath: createdWorktreePath,
+          });
           this.logService?.logUserAction(
             'create_session',
             `Created session "${session.name}" (${input.agentType}) in repo "${repo.name}" on branch "${initialBranchName}"`,
@@ -399,11 +420,20 @@ export class WorkspaceService {
     const repo = this.repoManager.get(repoId);
     if (!repo.is_git_repo) return [];
 
-    const [branches, occupancy, sessions] = await Promise.all([
+    const [localBranches, remoteBranches, occupancy, sessions] = await Promise.all([
       this.repoManager.listLocalBranches(repo, query),
+      this.repoManager.listRemoteBranches(repo, query),
       this.repoManager.listBranchOccupancy(repo),
       this.listSessions(repoId),
     ]);
+
+    const localBranchSet = new Set(localBranches);
+    // Remote branches that have no local counterpart
+    const remoteOnlyBranches = remoteBranches.filter((rb) => !localBranchSet.has(rb.localName));
+    const branches: Array<{ name: string; is_remote: boolean }> = [
+      ...localBranches.map((b) => ({ name: b, is_remote: false })),
+      ...remoteOnlyBranches.map((rb) => ({ name: rb.fullName, is_remote: true })),
+    ];
 
     const sessionsByWorktree = new Map<string, SessionWithGitStatus>();
     for (const session of sessions) {
@@ -411,8 +441,9 @@ export class WorkspaceService {
       sessionsByWorktree.set(this.normalizePath(session.worktree_path), session);
     }
 
-    return branches.map((branch) => {
-      const usage = occupancy.get(branch);
+    return branches.map(({ name: branch, is_remote }) => {
+      const localName = is_remote ? branch.replace(/^[^/]+\//, '') : branch;
+      const usage = occupancy.get(is_remote ? localName : branch);
       const session = usage?.worktree_path
         ? sessionsByWorktree.get(this.normalizePath(usage.worktree_path)) ?? null
         : null;
@@ -432,6 +463,7 @@ export class WorkspaceService {
         session_id: session?.id ?? null,
         session_name: session?.name ?? null,
         disabled_reason: disabledReason,
+        is_remote,
       } satisfies SessionBranchAvailability;
     });
   }
@@ -450,6 +482,20 @@ export class WorkspaceService {
 
     const session = sessionId ? this.getSessionForRepo(repoId, sessionId) : null;
     return this.repoManager.getHistory(repo, session?.worktree_path ?? null, limit ?? 40);
+  }
+
+  async getChangedFiles(repoId: number, sessionId?: number): Promise<GitChangedFile[]> {
+    const repo = this.repoManager.get(repoId);
+    if (!repo.is_git_repo) return [];
+
+    const session = sessionId ? this.getSessionForRepo(repoId, sessionId) : null;
+    return this.repoManager.getChangedFiles(repo, session?.worktree_path ?? null);
+  }
+
+  async getFileDiff(repoId: number, filePath: string, sessionId?: number): Promise<GitFileDiff> {
+    const repo = this.repoManager.get(repoId);
+    const session = sessionId ? this.getSessionForRepo(repoId, sessionId) : null;
+    return this.repoManager.getFileDiff(repo, filePath, session?.worktree_path ?? null);
   }
 
   private normalizePath(path: string): string {
@@ -591,10 +637,22 @@ export class WorkspaceService {
       return;
     }
 
+    const repo = this.repoManager.get(repoId);
+
+    // Delete from the main repo's agent dir so rediscovery doesn't re-import the old path.
+    try {
+      const targetPath = resolve(getAgentDir(repo.path), agentRelativePath);
+      if (existsSync(targetPath)) unlinkSync(targetPath);
+    } catch (error) {
+      console.warn('[WorkspaceService] Failed to delete repo file from main repo agent dir', {
+        repoId, repoPath: repo.path, filePath, error,
+      });
+    }
+
     const sessions = this.sessionStore.list(repoId);
     for (const session of sessions) {
       if (!session.worktree_path) continue;
-      if (this.normalizePath(session.worktree_path) === this.normalizePath(this.repoManager.get(repoId).path)) continue;
+      if (this.normalizePath(session.worktree_path) === this.normalizePath(repo.path)) continue;
       try {
         const targetPath = resolve(getAgentDir(session.worktree_path), agentRelativePath);
         if (existsSync(targetPath)) unlinkSync(targetPath);

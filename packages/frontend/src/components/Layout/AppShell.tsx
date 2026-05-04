@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useAppStore } from '../../store/appStore';
+import { useAppStore, type ActiveView } from '../../store/appStore';
 import { api } from '../../api/client';
 import RepoList from '../Sidebar/RepoList';
 import SessionList from '../Sidebar/SessionList';
@@ -13,6 +13,7 @@ import PipelineModal from './PipelineModal';
 import UsageModal from './UsageModal';
 import InstallToolsModal from './InstallToolsModal';
 import GitHistoryModal from './GitHistoryModal';
+import GitDiffView from './GitDiffModal';
 import LogsModal from './LogsModal';
 import LogSearchModal from './LogSearchModal';
 import PromptPanel from '../Prompt/PromptPanel';
@@ -23,7 +24,7 @@ import { useDragResize } from '../../hooks/useDragResize';
 import { useTokenUsage } from '../../hooks/useTokenUsage';
 
 export default function AppShell() {
-    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
+    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, activeDiffTarget, setActiveDiffTarget, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
 
     useNotifications();
 
@@ -59,6 +60,13 @@ export default function AppShell() {
     const openInVsCodeTargetPath = selectedSession?.worktree_path ?? gitContextRepo?.path ?? null;
     const canOpenTargetInVsCode = Boolean(openInVsCodeTargetPath && window.electronAPI?.isDesktop);
     const canShowGitHistory = Boolean(gitContextRepo?.is_git_repo);
+    const activeDiffRepo = activeDiffTarget
+        ? repos.find((repo) => repo.id === activeDiffTarget.repoId) ?? (selectedRepo?.id === activeDiffTarget.repoId ? selectedRepo : null)
+        : null;
+    const activeDiffSession = activeDiffTarget
+        ? sessions.find((session) => session.id === activeDiffTarget.sessionId && session.repo_id === activeDiffTarget.repoId) ?? null
+        : null;
+    const canShowDiffView = Boolean(activeDiffRepo?.is_git_repo && activeDiffSession);
 
     const syncBrowserFullscreen = useCallback(() => {
         setIsFullscreen(Boolean(document.fullscreenElement));
@@ -93,6 +101,16 @@ export default function AppShell() {
         }
     }, [openInVsCodeTargetPath]);
 
+    const cycleMainView = useCallback(() => {
+        const views: ActiveView[] = ['terminal'];
+        if (selectedMdFile) views.push('editor');
+        if (canShowDiffView) views.push('diff');
+
+        const currentIndex = views.indexOf(activeView);
+        const nextView = views[(currentIndex + 1) % views.length] ?? 'terminal';
+        setActiveView(nextView);
+    }, [activeView, canShowDiffView, selectedMdFile, setActiveView]);
+
     const formatTokenUsage = useCallback((value: number) => {
         return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: value >= 1000 ? 1 : 0 }).format(value);
     }, []);
@@ -120,6 +138,12 @@ export default function AppShell() {
             setShowGitHistory(false);
         }
     }, [canShowGitHistory]);
+
+    useEffect(() => {
+        if (activeDiffTarget && !canShowDiffView) {
+            setActiveDiffTarget(null);
+        }
+    }, [activeDiffTarget, canShowDiffView, setActiveDiffTarget]);
 
     useEffect(() => {
         if (window.electronAPI?.isDesktop) {
@@ -151,14 +175,10 @@ export default function AppShell() {
                 }
                 return;
             }
-            // Ctrl+` cycles between terminal and editor (Ctrl+` won't be captured by xterm)
+            // Ctrl+` cycles through available main views (Ctrl+` won't be captured by xterm)
             if (event.key === '`' && event.ctrlKey && !event.altKey && !event.metaKey) {
                 event.preventDefault();
-                if (activeView === 'terminal' && selectedMdFile) {
-                    setActiveView('editor');
-                } else if (activeView === 'editor') {
-                    setActiveView('terminal');
-                }
+                cycleMainView();
             }
             // Ctrl+1 — Run template, Ctrl+2 — Automation tasks, Ctrl+L — Lock
             if (event.key === '1' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
@@ -178,7 +198,7 @@ export default function AppShell() {
                 }
                 return;
             }
-            // Ctrl+3 — Git history, Ctrl+4 — Open in VS Code
+            // Ctrl+3 — Git history, Ctrl+4 — Search logs, Ctrl+5 — Open in VS Code
             if (event.key === '3' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 if (canShowGitHistory) {
                     event.preventDefault();
@@ -187,6 +207,13 @@ export default function AppShell() {
                 return;
             }
             if (event.key === '4' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                if (selectedSession) {
+                    event.preventDefault();
+                    setShowLogSearch(true);
+                }
+                return;
+            }
+            if (event.key === '5' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 if (canOpenTargetInVsCode) {
                     event.preventDefault();
                     void openSelectedContextInVsCode();
@@ -197,7 +224,7 @@ export default function AppShell() {
 
         window.addEventListener('keydown', onKeyDown);
         return () => window.removeEventListener('keydown', onKeyDown);
-    }, [toggleFullscreen, activeView, selectedMdFile, setActiveView, sessions, selectedSession, setSelectedSession, settings, lock, canShowGitHistory, setShowGitHistory, canOpenTargetInVsCode, openSelectedContextInVsCode]);
+    }, [toggleFullscreen, cycleMainView, setActiveView, sessions, selectedSession, setSelectedSession, settings, lock, canShowGitHistory, setShowGitHistory, canOpenTargetInVsCode, openSelectedContextInVsCode, setShowLogSearch]);
 
     // ── Shared button class strings ───────────────────────────────────────────
     const iconBtnBase = 'inline-flex items-center justify-center w-8 h-8 rounded-lg border transition-all font-medium';
@@ -212,7 +239,7 @@ export default function AppShell() {
                 <div className="min-w-0" />
                 <div className="flex items-center justify-center">
                     <div className={toolbarBoxCls}>
-                        {/* ── View toggle: Terminal / Editor ── */}
+                        {/* ── View toggle: Terminal / Editor / Diff ── */}
                         <div className="flex items-center gap-1">
                             <button
                                 onClick={() => setActiveView('terminal')}
@@ -238,6 +265,23 @@ export default function AppShell() {
                             >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                            </button>
+                            <button
+                                onClick={() => { if (canShowDiffView) setActiveView('diff'); }}
+                                disabled={!canShowDiffView}
+                                title={canShowDiffView
+                                    ? `Diff view for ${activeDiffSession?.name ?? 'session'} (Ctrl+\`)`
+                                    : 'Use a session diff icon to activate diff view'}
+                                className={`${iconBtnBase} ${activeView === 'diff'
+                                    ? 'bg-orange-600/10 border-orange-500/40 text-orange-200 shadow-[0_0_12px_rgba(234,88,12,0.25)]'
+                                    : canShowDiffView
+                                        ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                        : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
+                                    }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                                 </svg>
                             </button>
                         </div>
@@ -286,7 +330,7 @@ export default function AppShell() {
                             </button>
                             <button
                                 onClick={() => setShowLogSearch(true)}
-                                title={selectedSession ? `Search logs for ${selectedSession.name}` : 'Select a session to search its logs'}
+                                title={selectedSession ? `Search logs for ${selectedSession.name} (Ctrl+4)` : 'Select a session to search its logs'}
                                 disabled={!selectedSession}
                                 className={`${iconBtnBase} ${selectedSession
                                     ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
@@ -297,13 +341,19 @@ export default function AppShell() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
                                 </svg>
                             </button>
-                            {canOpenTargetInVsCode && gitContextRepo && (
+                            {Boolean(window.electronAPI?.isDesktop) && (
                                 <button
-                                    onClick={() => void openSelectedContextInVsCode()}
-                                    title={selectedSession
-                                        ? `Open ${selectedSession.name} worktree in VS Code (Ctrl+4)`
-                                        : `Open ${gitContextRepo.name} in VS Code (Ctrl+4)`}
-                                    className={iconBtnDefault}
+                                    onClick={() => { if (canOpenTargetInVsCode) void openSelectedContextInVsCode(); }}
+                                    title={canOpenTargetInVsCode
+                                        ? (selectedSession
+                                            ? `Open ${selectedSession.name} worktree in VS Code (Ctrl+5)`
+                                            : `Open ${gitContextRepo?.name} in VS Code (Ctrl+5)`)
+                                        : 'Select a repository or session to open in VS Code'}
+                                    disabled={!canOpenTargetInVsCode}
+                                    className={`${iconBtnBase} ${canOpenTargetInVsCode
+                                        ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
+                                        : 'bg-gray-800 border-gray-700 text-gray-500 opacity-40 cursor-not-allowed'
+                                        }`}
                                 >
                                     <img src="/visual-studio.png" alt="" className="w-4 h-4 object-contain" />
                                 </button>
@@ -487,6 +537,11 @@ export default function AppShell() {
                         {/* MD editor — shown only when editor view and a file is open */}
                         {activeView === 'editor' && selectedMdFile && (
                             <MdEditor />
+                        )}
+
+                        {/* Git diff — shown only after activating a session diff target */}
+                        {activeView === 'diff' && activeDiffRepo && activeDiffSession && (
+                            <GitDiffView repo={activeDiffRepo} session={activeDiffSession} />
                         )}
                     </div>
 
