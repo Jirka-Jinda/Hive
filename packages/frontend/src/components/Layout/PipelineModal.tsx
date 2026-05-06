@@ -33,7 +33,7 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
     }, []);
 
     const handleToggle = async (node: PipelineNodeDto) => {
-        if (toggling) return;
+        if (toggling || !node.configurable) return;
         setToggling(node.id);
         try {
             const updated = await api.pipeline.setEnabled(node.id, !node.enabled);
@@ -82,17 +82,20 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
                     {nodes.map((node) => (
                         <div
                             key={node.id}
-                            className="flex items-start gap-3 rounded-lg border border-gray-800 bg-gray-950/60 px-3 py-3"
+                            className={`flex items-start gap-3 rounded-lg border px-3 py-3 ${node.configurable
+                                ? 'border-gray-800 bg-gray-950/60'
+                                : 'border-gray-800/70 bg-gray-950/35'
+                                }`}
                         >
                             {/* Toggle */}
                             <button
                                 onClick={() => void handleToggle(node)}
-                                disabled={toggling === node.id}
-                                title={node.enabled ? 'Disable node' : 'Enable node'}
+                                disabled={toggling === node.id || !node.configurable}
+                                title={!node.configurable ? 'Coming soon' : node.enabled ? 'Disable node' : 'Enable node'}
                                 className={`relative mt-0.5 flex-shrink-0 w-9 h-5 rounded-full border transition-all focus:outline-none ${node.enabled
                                     ? 'bg-orange-600 border-orange-500'
                                     : 'bg-gray-700 border-gray-600'
-                                    } disabled:opacity-50`}
+                                    } disabled:opacity-40 disabled:cursor-not-allowed`}
                             >
                                 <span
                                     className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform ${node.enabled ? 'translate-x-4' : 'translate-x-0'
@@ -114,10 +117,20 @@ export default function PipelineModal({ onClose, onNodesChanged }: Props) {
                                             {PHASE_LABELS[phase]}
                                         </span>
                                     ))}
+                                    {!node.configurable && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-700 bg-gray-900/80 text-gray-500 font-medium">
+                                            Coming Soon
+                                        </span>
+                                    )}
                                 </div>
                                 <p className={`text-[11px] mt-0.5 leading-relaxed ${node.enabled ? 'text-gray-500' : 'text-gray-600'}`}>
                                     {node.description}
                                 </p>
+                                {!node.configurable && (
+                                    <p className="text-[11px] mt-1 leading-relaxed text-gray-600">
+                                        This planned step is shown for future configuration and cannot be enabled yet.
+                                    </p>
+                                )}
                                 {node.id === 'token-usage' && (
                                     <p className="text-[11px] mt-1 leading-relaxed text-gray-500">
                                         Disabling this hides the token usage box and stops counting new tokens immediately. Existing totals stay stored.

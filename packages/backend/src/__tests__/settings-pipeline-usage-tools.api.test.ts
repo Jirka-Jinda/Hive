@@ -46,6 +46,10 @@ describe('Pipeline API', () => {
     expect(res.status).toBe(200);
     const nodes = await res.json();
     expect(nodes.some((node: { id: string }) => node.id === 'token-usage')).toBe(true);
+    for (const id of ['git-preamble', 'context-budgeter', 'secrets-redactor']) {
+      const node = nodes.find((entry: { id: string }) => entry.id === id);
+      expect(node).toMatchObject({ enabled: false, configurable: false });
+    }
   });
 
   it('PUT /api/pipeline/:id — toggles a node', async () => {
@@ -73,6 +77,16 @@ describe('Pipeline API', () => {
       body: { enabled: true },
     });
     expect(res.status).toBe(404);
+  });
+
+  it('PUT /api/pipeline/:id — leaves future nodes disabled', async () => {
+    const res = await req(getApp(), '/api/pipeline/git-preamble', {
+      method: 'PUT',
+      body: { enabled: true },
+    });
+    expect(res.status).toBe(200);
+    const nodes = await res.json();
+    expect(nodes.find((node: { id: string; enabled: boolean }) => node.id === 'git-preamble')?.enabled).toBe(false);
   });
 });
 

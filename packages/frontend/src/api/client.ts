@@ -29,6 +29,7 @@ export interface PipelineNodeDto {
   description: string;
   phases: PipelinePhase[];
   enabled: boolean;
+  configurable: boolean;
 }
 
 export interface UsageTotals {

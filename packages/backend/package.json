@@ -1,6 +1,6 @@
 {
     "name": "@aw/backend",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "scripts": {
         "native:sync": "node scripts/ensure-native-deps.cjs",
         "dev": "npm run native:sync && tsx watch src/index.ts",

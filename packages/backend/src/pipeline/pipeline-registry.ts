@@ -17,17 +17,19 @@ export class PipelineRegistry {
   list(): PipelineNodeDto[] {
     const stored = this.settings.load().pipeline?.nodes ?? {};
     return this.nodes.map((node) => ({
+      configurable: node.configurable ?? true,
       id: node.id,
       name: node.name,
       description: node.description,
       phases: node.phases,
-      enabled: stored[node.id]?.enabled ?? node.defaultEnabled,
+      enabled: node.configurable === false ? false : (stored[node.id]?.enabled ?? node.defaultEnabled),
     }));
   }
 
   setEnabled(id: string, enabled: boolean): PipelineNodeDto[] {
     const node = this.nodes.find((n) => n.id === id);
     if (!node) throw new Error(`Pipeline node "${id}" not found`);
+    if (node.configurable === false) return this.list();
     const current = this.settings.load();
     const nodes = { ...(current.pipeline?.nodes ?? {}), [id]: { enabled } };
     this.settings.save({ pipeline: { nodes } });
@@ -44,7 +46,7 @@ export class PipelineRegistry {
     let result = text;
     for (const node of this.nodes) {
       if (!node.phases.includes(phase)) continue;
-      const enabled = stored[node.id]?.enabled ?? node.defaultEnabled;
+      const enabled = node.configurable === false ? false : (stored[node.id]?.enabled ?? node.defaultEnabled);
       if (!enabled) continue;
       result = await node.transform(result, { ...ctx, phase });
     }

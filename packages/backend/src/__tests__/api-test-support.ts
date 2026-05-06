@@ -45,6 +45,7 @@ import { TokenCounterService } from '../services/token-counter-service';
 import { AutomationService } from '../services/automation-service';
 import { WorkspaceService } from '../application/workspace-service';
 import { PipelineRegistry } from '../pipeline/pipeline-registry';
+import { createFuturePipelineNodes } from '../pipeline/nodes/future-pipeline-nodes';
 import { createTokenUsageNode } from '../pipeline/nodes/token-usage.node';
 import { LogService } from '../services/log-service';
 import { CentralMdSyncService } from '../services/central-md-sync';
@@ -83,6 +84,9 @@ function makeTestApp() {
   const tokenCounter = new TokenCounterService();
   const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager, undefined, changeFeed);
 
+  for (const node of createFuturePipelineNodes()) {
+    pipelineRegistry.register(node);
+  }
   pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));
 
   const app = new Hono();

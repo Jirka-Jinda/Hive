@@ -33,6 +33,8 @@ export interface PipelineNode {
   phases: PipelinePhase[];
   /** Default enabled state (overridden by persisted settings). */
   defaultEnabled: boolean;
+  /** Whether users can enable or disable this node. False is used for planned, inactive nodes. */
+  configurable?: boolean;
   /**
    * Transform text for the given phase.
    * For `session-start`, the initial text is ''; nodes append/return the startup payload.
@@ -48,4 +50,5 @@ export interface PipelineNodeDto {
   description: string;
   phases: PipelinePhase[];
   enabled: boolean;
+  configurable: boolean;
 }

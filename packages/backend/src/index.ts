@@ -27,6 +27,7 @@ import { NotificationBus } from './services/notification-bus';
 import { CentralMdSyncService } from './services/central-md-sync';
 import { PipelineRegistry } from './pipeline/pipeline-registry';
 import { createMdContextNode } from './pipeline/nodes/md-context.node';
+import { createFuturePipelineNodes } from './pipeline/nodes/future-pipeline-nodes';
 import { createTokenUsageNode } from './pipeline/nodes/token-usage.node';
 import { createSessionStateWatcherNode } from './pipeline/nodes/session-state-watcher.node';
 import { SessionStore } from './services/session-store';
@@ -139,6 +140,9 @@ try {
 
   const pipelineRegistry = new PipelineRegistry(settingsService);
   pipelineRegistry.register(createMdContextNode(mdRefService));
+  for (const node of createFuturePipelineNodes()) {
+    pipelineRegistry.register(node);
+  }
   pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));
   pipelineRegistry.register(createSessionStateWatcherNode(sessionStore, notificationBus));
 
