@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrate } from '../db/migrate';
@@ -42,7 +42,7 @@ describe('repo .agent markdown sync', () => {
     db.close();
   });
 
-  it('copies session .agent markdown into the repo root .agent folder during rediscovery', async () => {
+  it('captures unknown session .agent markdown as a session-scoped draft during rediscovery', async () => {
     const repoPath = join(testPaths.root, `repo-agent-root-${Date.now()}`);
     const worktreePath = join(testPaths.root, `repo-agent-worktree-${Date.now()}`);
     mkdirSync(repoPath, { recursive: true });
@@ -50,7 +50,7 @@ describe('repo .agent markdown sync', () => {
     writeFileSync(join(worktreePath, '.agent', 'generated.md'), '# Generated\n', 'utf8');
 
     const repo = await repoManager.addLocal(repoPath, 'agent-root-sync');
-    sessionStore.create({
+    const session = sessionStore.create({
       repoId: repo.id,
       agentType: 'claude',
       name: 'Agent session',
@@ -60,11 +60,11 @@ describe('repo .agent markdown sync', () => {
     workspace.rediscoverRepoMdFiles(repo.id);
 
     const copiedPath = join(repoPath, '.agent', 'generated.md');
-    expect(existsSync(copiedPath)).toBe(true);
-    expect(readFileSync(copiedPath, 'utf8')).toBe('# Generated\n');
-    expect(mdMgr.list('repo', repo.id)).toEqual(
+    expect(existsSync(copiedPath)).toBe(false);
+    expect(mdMgr.list('repo', repo.id).some((file) => file.path.endsWith('generated.md'))).toBe(false);
+    expect(mdMgr.list('session', undefined, session.id)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ path: '.agent/generated.md' }),
+        expect.objectContaining({ scope: 'session', session_id: session.id, path: 'generated.md' }),
       ]),
     );
   });
@@ -119,5 +119,35 @@ describe('repo .agent markdown sync', () => {
     expect(files.filter((file) => file.path.endsWith('prompt.md'))).toHaveLength(1);
     expect(files.find((file) => file.path === '.agent/prompt.md')).toBeUndefined();
     expect(mdMgr.read(original!.id).content).toBe('# Updated from worktree\n');
+  });
+
+  it('discovers session .agents markdown files as session-scoped drafts', async () => {
+    const repoPath = join(testPaths.root, `repo-agents-session-${Date.now()}`);
+    const worktreePath = join(testPaths.root, `repo-agents-session-worktree-${Date.now()}`);
+    mkdirSync(repoPath, { recursive: true });
+    mkdirSync(join(worktreePath, '.agents', 'skills'), { recursive: true });
+    writeFileSync(join(worktreePath, '.agents', 'skills', 'review.md'), '# Review\n', 'utf8');
+
+    const repo = await repoManager.addLocal(repoPath, 'agents-session-list');
+    const session = sessionStore.create({
+      repoId: repo.id,
+      agentType: 'claude',
+      name: 'Agent session',
+      worktreePath,
+    });
+
+    workspace.rediscoverRepoMdFiles(repo.id);
+
+    expect(workspace.listSessionAgentFiles(repo.id, session.id)).toEqual([
+      {
+        agentRelativePath: 'skills/review.md',
+        repoRelativePath: '.agent/skills/review.md',
+      },
+    ]);
+    expect(mdMgr.list('session', undefined, session.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ scope: 'session', session_id: session.id, path: 'skills/review.md' }),
+      ]),
+    );
   });
 });

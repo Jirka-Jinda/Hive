@@ -692,7 +692,7 @@ export default function SessionList() {
                                 </div>
                             )}
                             {isActive && isEditing && (
-                                <div className="px-2 pb-2 space-y-2">
+                                <div className="px-2 pb-2 space-y-2" onClick={(e) => e.stopPropagation()}>
                                     <input
                                         className="w-full bg-gray-950/80 border border-orange-500/30 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-500/30 transition-all"
                                         value={editingSessionName}

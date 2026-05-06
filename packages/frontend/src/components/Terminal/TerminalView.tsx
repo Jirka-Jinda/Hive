@@ -32,6 +32,8 @@ export default function TerminalView({ sessionId }: Props) {
 
         if (!containerRef.current) return;
 
+        let initialFitTimer: number | null = null;
+
         const term = new Terminal({
             allowProposedApi: true,
             theme: {
@@ -50,10 +52,13 @@ export default function TerminalView({ sessionId }: Props) {
         term.open(containerRef.current);
 
         // Measure after the browser has laid out the container, then unblock
-        // the WS connection with the real dimensions.
-        setTimeout(() => {
+        // the WS connection with the real dimensions and focus xterm so its
+        // hidden textarea tracks the live cursor after returning to a session.
+        initialFitTimer = window.setTimeout(() => {
             fitAddon.fit();
             setInitialDims({ cols: term.cols, rows: term.rows });
+            sendResize(term.cols, term.rows);
+            term.focus();
         }, 50);
 
         termRef.current = term;
@@ -70,6 +75,7 @@ export default function TerminalView({ sessionId }: Props) {
         observer.observe(containerRef.current);
 
         return () => {
+            if (initialFitTimer !== null) window.clearTimeout(initialFitTimer);
             observer.disconnect();
             term.dispose();
             termRef.current = null;

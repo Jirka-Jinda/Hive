@@ -2,14 +2,21 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node
 import { isAbsolute, relative, resolve } from 'node:path';
 
 export const AGENT_MD_DIR = '.agent';
+export const AGENT_MD_DIR_ALIASES = [AGENT_MD_DIR, '.agents'] as const;
 
 export interface AgentMarkdownFile {
   /** Path relative to the .agent directory, using forward slashes. */
   agentRelativePath: string;
+  agentDirName: string;
   /** Repo-relative path, using forward slashes. */
   repoRelativePath: string;
   fullPath: string;
   content: string;
+}
+
+export function isAgentDirName(value: string): boolean {
+  const lower = value.toLowerCase();
+  return AGENT_MD_DIR_ALIASES.some((dirName) => dirName === lower);
 }
 
 function normalizeRelativePath(path: string): string {
@@ -36,16 +43,26 @@ export function getAgentDir(rootPath: string): string {
   return resolve(rootPath, AGENT_MD_DIR);
 }
 
-export function toAgentRelativePath(repoRelativePath: string): string {
-  const normalized = normalizeMarkdownRelativePath(repoRelativePath);
-  const agentPrefix = `${AGENT_MD_DIR}/`;
-  return normalized.toLowerCase().startsWith(agentPrefix)
-    ? normalized.slice(agentPrefix.length)
-    : normalized;
+function getReadableAgentDirNames(rootPath: string): readonly string[] {
+  return AGENT_MD_DIR_ALIASES.filter((dirName) => existsSync(resolve(rootPath, dirName)));
 }
 
-export function toRepoAgentPath(agentRelativePath: string): string {
-  return `${AGENT_MD_DIR}/${normalizeMarkdownRelativePath(agentRelativePath)}`;
+export function getAgentDirNameFromRepoRelativePath(repoRelativePath: string): string | null {
+  const normalized = normalizeMarkdownRelativePath(repoRelativePath);
+  const lower = normalized.toLowerCase();
+  return AGENT_MD_DIR_ALIASES.find((dirName) => lower.startsWith(`${dirName}/`)) ?? null;
+}
+
+export function toAgentRelativePath(repoRelativePath: string): string {
+  const normalized = normalizeMarkdownRelativePath(repoRelativePath);
+  const lower = normalized.toLowerCase();
+  const agentPrefix = AGENT_MD_DIR_ALIASES.find((dirName) => lower.startsWith(`${dirName}/`));
+  return agentPrefix ? normalized.slice(agentPrefix.length + 1) : normalized;
+}
+
+export function toRepoAgentPath(agentRelativePath: string, agentDirName = AGENT_MD_DIR): string {
+  const normalizedDirName = isAgentDirName(agentDirName) ? agentDirName.toLowerCase() : AGENT_MD_DIR;
+  return `${normalizedDirName}/${normalizeMarkdownRelativePath(agentRelativePath)}`;
 }
 
 export function ensureAgentDir(rootPath: string): string {
@@ -55,16 +72,53 @@ export function ensureAgentDir(rootPath: string): string {
 }
 
 export function agentRelativePathFromFullPath(rootPath: string, fullPath: string): string | null {
-  const agentDir = getAgentDir(rootPath);
-  const rel = relative(agentDir, resolve(fullPath));
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
-  const normalized = rel.replace(/\\/g, '/');
-  if (!normalized.toLowerCase().endsWith('.md')) return null;
-  return normalizeMarkdownRelativePath(normalized);
+  const resolvedFullPath = resolve(fullPath);
+  for (const dirName of AGENT_MD_DIR_ALIASES) {
+    const agentDir = resolve(rootPath, dirName);
+    const rel = relative(agentDir, resolvedFullPath);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
+    const normalized = rel.replace(/\\/g, '/');
+    if (!normalized.toLowerCase().endsWith('.md')) return null;
+    return normalizeMarkdownRelativePath(normalized);
+  }
+  return null;
 }
 
-function walkAgentDir(rootPath: string, relativeDir: string, results: AgentMarkdownFile[]): void {
-  const dirPath = resolve(getAgentDir(rootPath), relativeDir);
+function readAgentMarkdownFile(rootPath: string, agentDirName: string, agentRelativePath: string): AgentMarkdownFile | null {
+  const normalized = normalizeMarkdownRelativePath(agentRelativePath);
+  const fullPath = resolve(rootPath, agentDirName, normalized);
+
+  try {
+    statSync(fullPath);
+    return {
+      agentRelativePath: normalized,
+      agentDirName,
+      repoRelativePath: toRepoAgentPath(normalized, agentDirName),
+      fullPath,
+      content: readFileSync(fullPath, 'utf8'),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function findAgentMarkdownFile(rootPath: string, agentRelativePath: string): AgentMarkdownFile | null {
+  const normalized = normalizeMarkdownRelativePath(agentRelativePath);
+  for (const dirName of AGENT_MD_DIR_ALIASES) {
+    const file = readAgentMarkdownFile(rootPath, dirName, normalized);
+    if (file) return file;
+  }
+  return null;
+}
+
+function walkAgentDir(
+  rootPath: string,
+  agentDirName: string,
+  relativeDir: string,
+  results: AgentMarkdownFile[],
+  seen: Set<string>,
+): void {
+  const dirPath = resolve(rootPath, agentDirName, relativeDir);
   let entries: { name: string; isDirectory(): boolean; isFile(): boolean }[] = [];
 
   try {
@@ -77,10 +131,10 @@ function walkAgentDir(rootPath: string, relativeDir: string, results: AgentMarkd
 
   for (const entry of entries) {
     const nextRelative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
-    const fullPath = resolve(getAgentDir(rootPath), nextRelative);
+    const fullPath = resolve(rootPath, agentDirName, nextRelative);
 
     if (entry.isDirectory()) {
-      walkAgentDir(rootPath, nextRelative, results);
+      walkAgentDir(rootPath, agentDirName, nextRelative, results, seen);
       continue;
     }
 
@@ -89,12 +143,16 @@ function walkAgentDir(rootPath: string, relativeDir: string, results: AgentMarkd
     try {
       statSync(fullPath);
       const agentRelativePath = normalizeMarkdownRelativePath(nextRelative);
+      const agentRelativeKey = agentRelativePath.toLowerCase();
+      if (seen.has(agentRelativeKey)) continue;
       results.push({
         agentRelativePath,
-        repoRelativePath: toRepoAgentPath(agentRelativePath),
+        agentDirName,
+        repoRelativePath: toRepoAgentPath(agentRelativePath, agentDirName),
         fullPath,
         content: readFileSync(fullPath, 'utf8'),
       });
+      seen.add(agentRelativeKey);
     } catch {
       // Ignore unreadable files and keep syncing the rest of the folder.
     }
@@ -102,8 +160,10 @@ function walkAgentDir(rootPath: string, relativeDir: string, results: AgentMarkd
 }
 
 export function readAgentMarkdownFiles(rootPath: string): AgentMarkdownFile[] {
-  if (!existsSync(getAgentDir(rootPath))) return [];
   const results: AgentMarkdownFile[] = [];
-  walkAgentDir(rootPath, '', results);
+  const seen = new Set<string>();
+  for (const agentDirName of getReadableAgentDirNames(rootPath)) {
+    walkAgentDir(rootPath, agentDirName, '', results, seen);
+  }
   return results.sort((left, right) => left.repoRelativePath.localeCompare(right.repoRelativePath));
 }

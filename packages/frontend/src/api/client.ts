@@ -151,10 +151,11 @@ export interface Agent {
 
 export interface MdFile {
   id: number;
-  scope: 'central' | 'repo';
+  scope: 'central' | 'repo' | 'session';
   repo_id: number | null;
+  session_id: number | null;
   path: string;
-  type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
+  type: 'documentation' | 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
   created_at: string;
   updated_at: string;
 }
@@ -168,6 +169,7 @@ export interface MdFileUpdateBody {
   content?: string;
   scope?: MdFile['scope'];
   repoPath?: string;
+  sessionId?: number;
   filename?: string;
   type?: MdFile['type'];
 }
@@ -349,17 +351,19 @@ export const api = {
   },
 
   mdfiles: {
-    list: (scope?: string, repoId?: number) => {
+    list: (scope?: string, repoId?: number, sessionId?: number) => {
       const params = new URLSearchParams();
       if (scope) params.set('scope', scope);
       if (repoId !== undefined) params.set('repoId', String(repoId));
+      if (sessionId !== undefined) params.set('sessionId', String(sessionId));
       const qs = params.toString();
       return request<MdFile[]>(`/mdfiles${qs ? `?${qs}` : ''}`);
     },
     get: (id: number) => request<MdFile & { content: string }>(`/mdfiles/${id}`),
     create: (body: {
-      scope: 'central' | 'repo';
+      scope: 'central' | 'repo' | 'session';
       repoPath?: string;
+      sessionId?: number;
       filename: string;
       content: string;
       type?: MdFile['type'];

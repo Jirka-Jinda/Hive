@@ -113,6 +113,7 @@ describe('SessionList', () => {
           id: 201,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'session-context.md',
           type: 'instruction',
           created_at: '2026-04-27T00:00:00Z',
@@ -126,6 +127,7 @@ describe('SessionList', () => {
         id: 201,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'session-context.md',
         type: 'instruction',
         created_at: '2026-04-27T00:00:00Z',
@@ -245,10 +247,17 @@ describe('SessionList', () => {
     expect(row).not.toBeNull();
 
     await user.click(within(row!).getByRole('button', { name: 'Update session' }));
-    const input = await screen.findByPlaceholderText('Session name');
+    await waitFor(() => {
+      expect(apiMock.repos.sessions.mdRefs.get).toHaveBeenCalledWith(1, 11);
+    });
+
+    const editingRow = screen.getByText('Alpha Session').closest('li');
+    expect(editingRow).not.toBeNull();
+
+    const input = await within(editingRow!).findByPlaceholderText('Session name');
     await user.clear(input);
     await user.type(input, 'Renamed Session');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await user.click(await within(editingRow!).findByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
       expect(apiMock.repos.sessions.update).toHaveBeenCalledWith(1, 11, { name: 'Renamed Session' });

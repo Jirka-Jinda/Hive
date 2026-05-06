@@ -24,7 +24,7 @@ import { useDragResize } from '../../hooks/useDragResize';
 import { useTokenUsage } from '../../hooks/useTokenUsage';
 
 export default function AppShell() {
-    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSettings, activeView, setActiveView, activeDiffTarget, setActiveDiffTarget, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
+    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSelectedMdFile, setSettings, activeView, setActiveView, activeDiffTarget, setActiveDiffTarget, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
 
     useNotifications();
 
@@ -121,11 +121,56 @@ export default function AppShell() {
                 setRepos(repos); setAgents(agents); setCredentials(credentials); setSettings(settings);
                 // Only load files belonging to the currently selected repo to prevent cross-repo pollution
                 const currentRepoId = useAppStore.getState().selectedRepo?.id ?? null;
-                setMdFiles(mdFiles.filter((f) => f.scope === 'central' || (currentRepoId !== null && f.repo_id === currentRepoId)));
+                setMdFiles(mdFiles.filter((f) => f.scope === 'central' || (currentRepoId !== null && f.scope === 'repo' && f.repo_id === currentRepoId)));
             })
             .catch(console.error);
         api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
     }, [setRepos, setAgents, setCredentials, setMdFiles, setSettings]);
+
+    useEffect(() => {
+        if (!selectedRepo) return;
+
+        if (!selectedSession?.id || !selectedSession.worktree_path) {
+            const { mdFiles, selectedMdFile } = useAppStore.getState();
+            const visibleFiles = mdFiles.filter((file) => file.scope !== 'session');
+            setMdFiles(visibleFiles);
+            if (selectedMdFile?.scope === 'session') {
+                setSelectedMdFile(null);
+            }
+            return;
+        }
+
+        let cancelled = false;
+        api.mdfiles.list('session', undefined, selectedSession.id)
+            .then((sessionFiles) => {
+                if (cancelled) return;
+                const { mdFiles, selectedMdFile, selectedRepo: currentRepo, selectedSession: currentSession } = useAppStore.getState();
+                if (currentRepo?.id !== selectedRepo.id || currentSession?.id !== selectedSession.id) return;
+
+                const centralFiles = mdFiles.filter((file) => file.scope === 'central');
+                const repoFiles = mdFiles.filter((file) => file.scope === 'repo');
+                setMdFiles([...centralFiles, ...repoFiles, ...sessionFiles]);
+
+                if (
+                    selectedMdFile?.scope === 'session' &&
+                    !sessionFiles.some((file) => file.id === selectedMdFile.id)
+                ) {
+                    setSelectedMdFile(null);
+                }
+            })
+            .catch(() => {
+                if (cancelled) return;
+                const { mdFiles, selectedMdFile } = useAppStore.getState();
+                setMdFiles(mdFiles.filter((file) => file.scope !== 'session'));
+                if (selectedMdFile?.scope === 'session') {
+                    setSelectedMdFile(null);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedRepo?.id, selectedSession?.id, selectedSession?.worktree_path, setMdFiles, setSelectedMdFile]);
 
     useEffect(() => {
         if (!tokenUsageEnabled) {

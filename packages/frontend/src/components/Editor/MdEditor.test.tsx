@@ -43,6 +43,7 @@ describe('MdEditor', () => {
           id: 101,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'notes.md',
           type: 'instruction',
           created_at: '2026-04-27T00:00:00Z',
@@ -53,6 +54,7 @@ describe('MdEditor', () => {
         id: 101,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'notes.md',
         type: 'instruction',
         created_at: '2026-04-27T00:00:00Z',
@@ -68,6 +70,7 @@ describe('MdEditor', () => {
       id: 101,
       scope: 'repo',
       repo_id: 7,
+      session_id: null,
       path: 'notes.md',
       type: 'tool',
       created_at: '2026-04-27T00:00:00Z',
@@ -108,8 +111,9 @@ describe('MdEditor', () => {
     const user = userEvent.setup();
     let resolveUpdate: ((value: {
       id: number;
-      scope: 'central' | 'repo';
+      scope: 'central' | 'repo' | 'session';
       repo_id: number | null;
+      session_id: number | null;
       path: string;
       type: 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
       created_at: string;
@@ -131,6 +135,7 @@ describe('MdEditor', () => {
           id: 101,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'notes.md',
           type: 'instruction',
           created_at: '2026-04-27T00:00:00Z',
@@ -140,6 +145,7 @@ describe('MdEditor', () => {
           id: 202,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'template.md',
           type: 'prompt',
           created_at: '2026-04-27T00:00:00Z',
@@ -150,6 +156,7 @@ describe('MdEditor', () => {
         id: 101,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'notes.md',
         type: 'instruction',
         created_at: '2026-04-27T00:00:00Z',
@@ -175,6 +182,7 @@ describe('MdEditor', () => {
         id: 202,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'template.md',
         type: 'prompt',
         created_at: '2026-04-27T00:00:00Z',
@@ -196,6 +204,7 @@ describe('MdEditor', () => {
       id: 101,
       scope: 'central',
       repo_id: null,
+      session_id: null,
       path: 'notes.md',
       type: 'instruction',
       created_at: '2026-04-27T00:00:00Z',

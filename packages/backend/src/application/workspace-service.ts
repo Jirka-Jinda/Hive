@@ -15,8 +15,9 @@ import type { MdFile } from '../services/mdfile-manager';
 import type { LogService } from '../services/log-service';
 import {
   AGENT_MD_DIR,
+  AGENT_MD_DIR_ALIASES,
   ensureAgentDir,
-  getAgentDir,
+  getAgentDirNameFromRepoRelativePath,
   normalizeMarkdownRelativePath,
   readAgentMarkdownFiles,
   toAgentRelativePath,
@@ -137,18 +138,15 @@ export class WorkspaceService {
   }
 
   /**
-   * Re-discovers md files on disk for the given repo root, first promoting
-   * session worktree `.agent/` updates back to the repo root. Worktree copies
-   * intentionally win over older repo markdown so an idle agent's generated
-   * prompts are captured without a manual promotion step.
+   * Re-discovers md files on disk for the given repo root and its session
+   * worktrees. Repo-scoped files stay repo-scoped; unknown worktree-local
+   * files are captured as session-scoped drafts for the owning session.
    */
   rediscoverRepoMdFiles(repoId: number): void {
     const repo = this.repoManager.get(repoId);
 
-    const currentAgentPaths = this.mergeSessionAgentFilesIntoRepo(repo);
-
     const discovered = discoverRepoMdFiles(repo.path);
-    const isAgentFile = (path: string) => path.toLowerCase().startsWith(`${AGENT_MD_DIR}/`);
+    const isAgentFile = (path: string) => path.toLowerCase().startsWith(`${AGENT_MD_DIR}/`) || path.toLowerCase().startsWith('.agents/');
     const nonAgentFiles = discovered.filter((file) => !isAgentFile(file.path));
     const agentFiles = discovered.filter((file) => isAgentFile(file.path));
     if (nonAgentFiles.length > 0) {
@@ -157,7 +155,10 @@ export class WorkspaceService {
     if (agentFiles.length > 0) {
       this.mdFileManager.importDiscoveredRepoFiles(repoId, agentFiles);
     }
-    this.mdFileManager.pruneMissingRepoAgentFiles(repoId, currentAgentPaths);
+
+    const repoAgentPaths = new Set(readAgentMarkdownFiles(repo.path).map((file) => file.repoRelativePath));
+    this.mdFileManager.pruneMissingRepoAgentFiles(repoId, repoAgentPaths);
+    this.rediscoverSessionMdFiles(repoId);
 
     // Propagate changes downstream to all session worktrees.
     void this.syncRepoFilesToAllWorktrees(repoId).catch((error) => {
@@ -529,72 +530,36 @@ export class WorkspaceService {
   }
 
   /**
-   * Lists `.agent/` files in a session's worktree that are NOT tracked as
-   * repo-scoped MD files. These are files created by the agent during the
-   * session and can be promoted to the repo via promoteSessionAgentFile.
+     * Compatibility shim for the old session agent-files API. Returns current
+     * session-scoped MD files for the selected session.
    */
   listSessionAgentFiles(repoId: number, sessionId: number): SessionAgentFile[] {
-    const session = this.getSessionForRepo(repoId, sessionId);
-    if (!session.worktree_path) return [];
-
-    const worktreeFiles = readAgentMarkdownFiles(session.worktree_path);
-    if (worktreeFiles.length === 0) return [];
-
-    const repoAgentPaths = new Set<string>(
-      this.mdFileManager.list('repo', repoId).map((f) => {
-        try { return toAgentRelativePath(f.path).toLowerCase(); } catch { return null; }
-      }).filter((p): p is string => p !== null),
-    );
-
-    return worktreeFiles
-      .filter((f) => !repoAgentPaths.has(f.agentRelativePath.toLowerCase()))
-      .map(({ agentRelativePath, repoRelativePath }) => ({ agentRelativePath, repoRelativePath }));
+      this.getSessionForRepo(repoId, sessionId);
+      return this.mdFileManager.list('session', undefined, sessionId).map((file) => {
+        const agentRelativePath = toAgentRelativePath(file.path);
+        return {
+          agentRelativePath,
+          repoRelativePath: toRepoAgentPath(agentRelativePath),
+        };
+      });
   }
 
   /**
-   * Promotes a session agent file to a repo-scoped MD file. The file is
-   * written to the repo root `.agent/` directory (for persistence) and added
-   * to the DB. The worktree copy is left untouched. No immediate downstream
-   * sync is triggered — the file will be pushed to other worktrees on the
-   * next natural sync event.
+   * Compatibility shim for the old session agent-files promote API. Session
+   * files now become repo-scoped via a normal scope change.
    */
   async promoteSessionAgentFile(repoId: number, sessionId: number, agentRelativePath: string): Promise<MdFile> {
-    const session = this.getSessionForRepo(repoId, sessionId);
-    if (!session.worktree_path) throw new Error('Session has no worktree');
-
     const normalized = normalizeMarkdownRelativePath(agentRelativePath);
-    const worktreeAgentDir = getAgentDir(session.worktree_path);
-    const fullPath = resolve(worktreeAgentDir, normalized);
-
-    // Security: ensure resolved path stays within the .agent dir.
-    const rel = relative(worktreeAgentDir, fullPath);
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
-      throw new Error('Invalid agent file path');
-    }
-
-    if (!existsSync(fullPath)) throw new Error(`Session file not found: ${agentRelativePath}`);
-    const content = readFileSync(fullPath, 'utf8');
-    const repoPath = toRepoAgentPath(normalized);
-
-    const type = inferAgentMdType(normalized);
-
     const repo = this.repoManager.get(repoId);
+    const sessionFile = this.mdFileManager
+      .list('session', undefined, sessionId)
+      .find((file) => toAgentRelativePath(file.path).toLowerCase() === normalized.toLowerCase());
+    if (!sessionFile) throw new Error(`Session file not found: ${agentRelativePath}`);
 
-    // Write to repo root .agent/ so the file survives rediscovery cycles.
-    // Suppress the repo-root watcher so this write does not immediately
-    // trigger a downstream sync to all worktrees.
-    const releaseWatch = await this.suppressAgentMdWatchRoots([repo.path]);
-    try {
-      const repoAgentDir = ensureAgentDir(repo.path);
-      const repoTargetPath = resolve(repoAgentDir, normalized);
-      mkdirSync(dirname(repoTargetPath), { recursive: true });
-      writeFileSync(repoTargetPath, content, 'utf8');
-
-      const results = this.mdFileManager.importDiscoveredRepoFiles(repoId, [{ path: repoPath, content, type }]);
-      return results[0]!;
-    } finally {
-      releaseWatch();
-    }
+    const updated = this.mdFileManager.update(sessionFile.id, { scope: 'repo', repoPath: repo.path });
+    this.deleteSessionFileFromWorktree(sessionId, sessionFile.path);
+    await this.syncRepoFilesToAllWorktrees(repoId);
+    return updated;
   }
 
   /**
@@ -625,6 +590,19 @@ export class WorkspaceService {
     }
   }
 
+  async syncSessionFilesToWorktree(sessionId: number): Promise<void> {
+    const session = this.sessionStore.get(sessionId);
+    if (!session.worktree_path) return;
+
+    const files = this.snapshotSessionMdFiles(sessionId);
+    const releaseWatch = await this.suppressAgentMdWatchRoots([session.worktree_path]);
+    try {
+      this.syncSessionFilesSnapshotToWorktree(session.worktree_path, files);
+    } finally {
+      releaseWatch();
+    }
+  }
+
   /**
    * Deletes a repo-scoped MD file from all session worktrees. Called when
    * a repo file is deleted via the API so worktrees stay in sync.
@@ -639,35 +617,65 @@ export class WorkspaceService {
 
     const repo = this.repoManager.get(repoId);
 
-    // Delete from the main repo's agent dir so rediscovery doesn't re-import the old path.
-    try {
-      const targetPath = resolve(getAgentDir(repo.path), agentRelativePath);
-      if (existsSync(targetPath)) unlinkSync(targetPath);
-    } catch (error) {
-      console.warn('[WorkspaceService] Failed to delete repo file from main repo agent dir', {
-        repoId, repoPath: repo.path, filePath, error,
-      });
+    // Delete from the main repo's agent dirs so rediscovery doesn't re-import the old path.
+    for (const agentDirName of AGENT_MD_DIR_ALIASES) {
+      try {
+        const targetPath = resolve(repo.path, toRepoAgentPath(agentRelativePath, agentDirName));
+        if (existsSync(targetPath)) unlinkSync(targetPath);
+      } catch (error) {
+        console.warn('[WorkspaceService] Failed to delete repo file from main repo agent dir', {
+          repoId, repoPath: repo.path, filePath, agentDirName, error,
+        });
+      }
     }
 
     const sessions = this.sessionStore.list(repoId);
     for (const session of sessions) {
       if (!session.worktree_path) continue;
       if (this.normalizePath(session.worktree_path) === this.normalizePath(repo.path)) continue;
+      for (const agentDirName of AGENT_MD_DIR_ALIASES) {
+        try {
+          const targetPath = resolve(session.worktree_path, toRepoAgentPath(agentRelativePath, agentDirName));
+          if (existsSync(targetPath)) unlinkSync(targetPath);
+        } catch (error) {
+          console.warn('[WorkspaceService] Failed to delete repo file from worktree', {
+            repoId, worktreePath: session.worktree_path, filePath, agentDirName, error,
+          });
+        }
+      }
+    }
+  }
+
+  deleteSessionFileFromWorktree(sessionId: number, filePath: string): void {
+    const session = this.sessionStore.get(sessionId);
+    if (!session.worktree_path) return;
+
+    let agentRelativePath: string;
+    try {
+      agentRelativePath = toAgentRelativePath(filePath);
+    } catch {
+      return;
+    }
+
+    for (const agentDirName of AGENT_MD_DIR_ALIASES) {
       try {
-        const targetPath = resolve(getAgentDir(session.worktree_path), agentRelativePath);
+        const targetPath = resolve(session.worktree_path, toRepoAgentPath(agentRelativePath, agentDirName));
         if (existsSync(targetPath)) unlinkSync(targetPath);
       } catch (error) {
-        console.warn('[WorkspaceService] Failed to delete repo file from worktree', {
-          repoId, worktreePath: session.worktree_path, filePath, error,
+        console.warn('[WorkspaceService] Failed to delete session file from worktree', {
+          sessionId,
+          worktreePath: session.worktree_path,
+          filePath,
+          agentDirName,
+          error,
         });
       }
     }
   }
 
   private syncRepoFilesToWorktree(repoId: number, worktreePath: string, files: readonly RepoMdFileSnapshot[]): void {
-    let agentDir: string;
     try {
-      agentDir = ensureAgentDir(worktreePath);
+      ensureAgentDir(worktreePath);
     } catch (error) {
       console.warn('[WorkspaceService] Failed to create worktree .agent directory', { worktreePath, error });
       return;
@@ -677,7 +685,8 @@ export class WorkspaceService {
     for (const file of files) {
       try {
         const agentRelativePath = toAgentRelativePath(file.path);
-        const targetPath = resolve(agentDir, agentRelativePath);
+        const agentDirName = getAgentDirNameFromRepoRelativePath(file.path) ?? AGENT_MD_DIR;
+        const targetPath = resolve(worktreePath, toRepoAgentPath(agentRelativePath, agentDirName));
         const targetKey = this.normalizePath(targetPath);
         if (writtenTargets.has(targetKey)) continue;
         mkdirSync(dirname(targetPath), { recursive: true });
@@ -693,6 +702,44 @@ export class WorkspaceService {
     }
   }
 
+  private syncSessionFilesSnapshotToWorktree(worktreePath: string, files: readonly RepoMdFileSnapshot[]): void {
+    try {
+      ensureAgentDir(worktreePath);
+    } catch (error) {
+      console.warn('[WorkspaceService] Failed to create worktree .agent directory for session files', { worktreePath, error });
+      return;
+    }
+
+    const writtenTargets = new Set<string>();
+    for (const file of files) {
+      try {
+        const agentRelativePath = toAgentRelativePath(file.path);
+        const targetPath = resolve(worktreePath, toRepoAgentPath(agentRelativePath, AGENT_MD_DIR));
+        const targetKey = this.normalizePath(targetPath);
+        if (writtenTargets.has(targetKey)) continue;
+
+        for (const agentDirName of AGENT_MD_DIR_ALIASES) {
+          const aliasPath = resolve(worktreePath, toRepoAgentPath(agentRelativePath, agentDirName));
+          if (this.normalizePath(aliasPath) !== targetKey && existsSync(aliasPath)) {
+            unlinkSync(aliasPath);
+          }
+        }
+
+        mkdirSync(dirname(targetPath), { recursive: true });
+        if (!existsSync(targetPath) || readFileSync(targetPath, 'utf8') !== file.content) {
+          writeFileSync(targetPath, file.content, 'utf8');
+        }
+        writtenTargets.add(targetKey);
+      } catch (error) {
+        console.warn('[WorkspaceService] Failed to sync session md file to worktree .agent', {
+          worktreePath,
+          path: file.path,
+          error,
+        });
+      }
+    }
+  }
+
   private snapshotRepoMdFiles(repoId: number): RepoMdFileSnapshot[] {
     return this.mdFileManager.list('repo', repoId).map((file) => ({
       path: file.path,
@@ -700,32 +747,54 @@ export class WorkspaceService {
     }));
   }
 
-  private mergeSessionAgentFilesIntoRepo(repo: Repo): Set<string> {
-    const currentAgentPaths = new Set<string>();
-    for (const file of readAgentMarkdownFiles(repo.path)) {
-      currentAgentPaths.add(file.repoRelativePath);
-    }
+  private snapshotSessionMdFiles(sessionId: number): RepoMdFileSnapshot[] {
+    return this.mdFileManager.list('session', undefined, sessionId).map((file) => ({
+      path: file.path,
+      content: this.mdFileManager.read(file.id).content,
+    }));
+  }
 
-    const repoPath = this.normalizePath(repo.path);
-    let repoAgentDir: string | null = null;
-    for (const session of this.sessionStore.list(repo.id)) {
-      if (!session.worktree_path || this.normalizePath(session.worktree_path) === repoPath) continue;
-
-      for (const file of readAgentMarkdownFiles(session.worktree_path)) {
-        currentAgentPaths.add(file.repoRelativePath);
-        repoAgentDir ??= ensureAgentDir(repo.path);
-        const targetPath = resolve(repoAgentDir, file.agentRelativePath);
-        const rel = relative(repoAgentDir, targetPath);
-        if (!rel || rel.startsWith('..') || isAbsolute(rel)) continue;
-
-        mkdirSync(dirname(targetPath), { recursive: true });
-        if (!existsSync(targetPath) || readFileSync(targetPath, 'utf8') !== file.content) {
-          writeFileSync(targetPath, file.content, 'utf8');
-        }
+  private rediscoverSessionMdFiles(repoId: number): void {
+    const repoFilesByAgentPath = new Map<string, MdFile>();
+    for (const file of this.mdFileManager.list('repo', repoId)) {
+      try {
+        repoFilesByAgentPath.set(toAgentRelativePath(file.path).toLowerCase(), file);
+      } catch {
+        // Skip invalid markdown paths.
       }
     }
 
-    return currentAgentPaths;
+    for (const session of this.sessionStore.list(repoId)) {
+      if (!session.worktree_path) continue;
+
+      const worktreeFiles = readAgentMarkdownFiles(session.worktree_path);
+      const sessionFiles: Array<{ path: string; content: string; type: MdFile['type'] }> = [];
+
+      for (const file of worktreeFiles) {
+        const repoFile = repoFilesByAgentPath.get(file.agentRelativePath.toLowerCase());
+        if (repoFile) {
+          const current = this.mdFileManager.read(repoFile.id);
+          if (current.content !== file.content || repoFile.type !== inferAgentMdType(file.agentRelativePath)) {
+            this.mdFileManager.update(repoFile.id, {
+              content: file.content,
+              type: inferAgentMdType(file.agentRelativePath),
+            });
+          }
+          continue;
+        }
+
+        sessionFiles.push({
+          path: file.agentRelativePath,
+          content: file.content,
+          type: inferAgentMdType(file.agentRelativePath),
+        });
+      }
+
+      if (sessionFiles.length > 0) {
+        this.mdFileManager.importDiscoveredSessionFiles(session.id, sessionFiles);
+      }
+      this.mdFileManager.pruneMissingSessionFiles(session.id, new Set(sessionFiles.map((file) => file.path)));
+    }
   }
 
   private getSessionForRepo(repoId: number, sessionId: number): Session {

@@ -9,6 +9,7 @@ describe('MD Files API', () => {
   let fileId = 0;
   let repoId = 0;
   let repoPath = '';
+  let sessionId = 0;
   let otherRepoId = 0;
   let otherRepoPath = '';
 
@@ -21,6 +22,12 @@ describe('MD Files API', () => {
       body: { path: repoPath, name: 'md-repo' },
     });
     repoId = (await res.json()).id;
+
+    const sessionRes = await req(getApp(), `/api/repos/${repoId}/sessions`, {
+      method: 'POST',
+      body: { name: 'md-session', agentType: 'claude' },
+    });
+    sessionId = (await sessionRes.json()).id;
 
     otherRepoPath = join(testPaths.root, 'mdfiles-other-repo');
     mkdirSync(otherRepoPath, { recursive: true });
@@ -84,6 +91,31 @@ describe('MD Files API', () => {
     expect(res.status).toBe(200);
     const files = await res.json();
     expect(files.some((file: { path: string }) => file.path.endsWith('repo-notes-mdfiles-api.md'))).toBe(true);
+  });
+
+  it('POST /api/mdfiles — 201 creating a session draft file', async () => {
+    const res = await req(getApp(), '/api/mdfiles', {
+      method: 'POST',
+      body: {
+        scope: 'session',
+        sessionId,
+        filename: 'branch-notes.md',
+        content: '# Branch Notes',
+        type: 'other',
+      },
+    });
+    expect(res.status).toBe(201);
+    const file = await res.json();
+    expect(file.scope).toBe('session');
+    expect(file.session_id).toBe(sessionId);
+    expect(file.repo_id).toBe(repoId);
+  });
+
+  it('GET /api/mdfiles?scope=session&sessionId=:id — includes session files created via API', async () => {
+    const res = await req(getApp(), `/api/mdfiles?scope=session&sessionId=${sessionId}`);
+    expect(res.status).toBe(200);
+    const files = await res.json() as { path: string; scope: string; session_id: number }[];
+    expect(files.some((file) => file.scope === 'session' && file.session_id === sessionId && file.path === 'branch-notes.md')).toBe(true);
   });
 
   it('PUT /api/mdfiles/:id — updates content on disk and DB', async () => {
@@ -201,6 +233,15 @@ describe('MD Files API', () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/repopath is required/i);
+  });
+
+  it('POST /api/mdfiles — 400 when session scope is missing sessionId', async () => {
+    const res = await req(getApp(), '/api/mdfiles', {
+      method: 'POST',
+      body: { scope: 'session', filename: 'session-file', content: 'x', type: 'other' },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/sessionid is required/i);
   });
 
   it('GET /api/mdfiles/:id — 404 for non-existent id', async () => {

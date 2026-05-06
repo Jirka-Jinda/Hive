@@ -72,4 +72,28 @@ describe('RepoAgentMdWatcher', () => {
     expect(workspace.rediscoverRepoMdFiles).toHaveBeenCalledWith(42);
     expect(notificationBus.emitMdFilesChanged).toHaveBeenCalledWith({ scope: 'repo', repoId: 42 });
   });
+
+  it('re-scans repo markdown when an .agents markdown file is added', () => {
+    vi.useFakeTimers();
+    const rootPath = join(testPaths.root, 'watcher-root-agents');
+    const workspace = {
+      listAgentMdWatchRoots: vi.fn(() => [{ repoId: 42, path: rootPath }]),
+      rediscoverRepoMdFiles: vi.fn(),
+    };
+    const notificationBus = {
+      emitMdFilesChanged: vi.fn(),
+    };
+
+    const watcher = new RepoAgentMdWatcher(workspace as any, notificationBus as any);
+    watcher.startWatching();
+    vi.advanceTimersByTime(100);
+    workspace.rediscoverRepoMdFiles.mockClear();
+    notificationBus.emitMdFilesChanged.mockClear();
+
+    chokidarMock.handlers.get('add')?.(join(rootPath, '.agents', 'created.md'));
+    vi.advanceTimersByTime(100);
+
+    expect(workspace.rediscoverRepoMdFiles).toHaveBeenCalledWith(42);
+    expect(notificationBus.emitMdFilesChanged).toHaveBeenCalledWith({ scope: 'repo', repoId: 42 });
+  });
 });

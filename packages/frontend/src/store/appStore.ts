@@ -79,14 +79,16 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedRepo: (repo) =>
     set((state) => {
       const selectedMdFile =
-        state.selectedMdFile?.scope === 'repo' ? null : state.selectedMdFile;
+        state.selectedMdFile?.scope === 'repo' || state.selectedMdFile?.scope === 'session'
+          ? null
+          : state.selectedMdFile;
       const activeView: ActiveView = selectedMdFile ? 'editor' : 'terminal';
 
       return {
         selectedRepo: repo,
         selectedSession: null,
         sessions: [],
-        mdFiles: state.mdFiles.filter((file) => file.scope !== 'repo'),
+        mdFiles: state.mdFiles.filter((file) => file.scope === 'central'),
         selectedMdFile,
         activeView,
         activeDiffTarget: null,

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-type MdFileType = 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
+type MdFileType = 'documentation' | 'skill' | 'tool' | 'instruction' | 'prompt' | 'other';
 
 export interface DiscoveredRepoMdFile {
   path: string;

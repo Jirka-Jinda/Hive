@@ -44,8 +44,8 @@ export function useNotifications(): void {
           if (msg.type === 'md-files-changed' && msg.scope === 'central') {
             void api.mdfiles.list('central').then((centralFiles) => {
               const { mdFiles, selectedMdFile } = useAppStore.getState();
-              const repoFiles = mdFiles.filter((file) => file.scope === 'repo');
-              setMdFiles([...centralFiles, ...repoFiles]);
+              const scopedFiles = mdFiles.filter((file) => file.scope !== 'central');
+              setMdFiles([...centralFiles, ...scopedFiles]);
 
               if (
                 selectedMdFile?.scope === 'central' &&
@@ -60,15 +60,28 @@ export function useNotifications(): void {
 
           if (msg.type === 'md-files-changed' && msg.scope === 'repo' && msg.repoId !== undefined) {
             const repoId = msg.repoId;
-            void api.mdfiles.list('repo', repoId).then((freshRepoFiles) => {
-              const { mdFiles, selectedMdFile, selectedRepo } = useAppStore.getState();
+            const { selectedRepo, selectedSession } = useAppStore.getState();
+            const sessionFilesPromise = selectedSession?.repo_id === repoId && selectedSession.worktree_path
+              ? api.mdfiles.list('session', undefined, selectedSession.id)
+              : Promise.resolve([]);
+
+            void Promise.all([api.mdfiles.list('repo', repoId), sessionFilesPromise]).then(([freshRepoFiles, sessionFiles]) => {
+              const { mdFiles, selectedMdFile, selectedRepo: currentRepo } = useAppStore.getState();
               if (selectedRepo?.id !== repoId) return;
+              if (currentRepo?.id !== repoId) return;
               const centralFiles = mdFiles.filter((file) => file.scope === 'central');
-              setMdFiles([...centralFiles, ...freshRepoFiles]);
+              setMdFiles([...centralFiles, ...freshRepoFiles, ...sessionFiles]);
 
               if (
                 selectedMdFile?.scope === 'repo' &&
                 !freshRepoFiles.some((file) => file.id === selectedMdFile.id)
+              ) {
+                setSelectedMdFile(null);
+              }
+
+              if (
+                selectedMdFile?.scope === 'session' &&
+                !sessionFiles.some((file) => file.id === selectedMdFile.id)
               ) {
                 setSelectedMdFile(null);
               }

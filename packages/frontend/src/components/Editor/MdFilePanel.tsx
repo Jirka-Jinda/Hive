@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { api } from '../../api/client';
-import type { MdFile, SessionAgentFile } from '../../api/client';
+import type { MdFile } from '../../api/client';
 
 interface Props {
     onCollapse: () => void;
 }
 
 const typeIcon: Record<MdFile['type'], string> = {
+    documentation: '📖',
     skill: '🧠',
     tool: '🔧',
     instruction: '📋',
@@ -15,7 +16,16 @@ const typeIcon: Record<MdFile['type'], string> = {
     other: '📄',
 };
 
-const TYPE_ORDER: Record<MdFile['type'], number> = { skill: 0, tool: 1, instruction: 2, prompt: 3, other: 4 };
+const typeTextColor: Record<MdFile['type'], string> = {
+    documentation: 'text-teal-300',
+    skill: '',
+    tool: '',
+    instruction: '',
+    prompt: '',
+    other: '',
+};
+
+const TYPE_ORDER: Record<MdFile['type'], number> = { documentation: 0, skill: 1, tool: 2, instruction: 3, prompt: 4, other: 5 };
 const sortByType = (files: MdFile[]) =>
     [...files].sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type]);
 
@@ -63,7 +73,7 @@ function ActionButton({
 
 export default function MdFilePanel({ onCollapse }: Props) {
     const { mdFiles, setMdFiles, selectedRepo, setSelectedMdFile, selectedMdFile, selectedSession } = useAppStore();
-    const [createForScope, setCreateForScope] = useState<'central' | 'repo' | null>(null);
+    const [createForScope, setCreateForScope] = useState<'central' | 'repo' | 'session' | null>(null);
     const [newName, setNewName] = useState('');
     const [newType, setNewType] = useState<MdFile['type']>('other');
     const [creating, setCreating] = useState(false);
@@ -71,7 +81,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
     const [deleting, setDeleting] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
     const [dropContent, setDropContent] = useState<string | null>(null);
-    const [dragOverScope, setDragOverScope] = useState<'central' | 'repo' | null>(null);
+    const [dragOverScope, setDragOverScope] = useState<'central' | 'repo' | 'session' | null>(null);
     const [showGuide, setShowGuide] = useState(false);
     const [promptCreating, setPromptCreating] = useState(false);
     const [promptNewName, setPromptNewName] = useState('');
@@ -84,48 +94,17 @@ export default function MdFilePanel({ onCollapse }: Props) {
     const [repoCollapsed, setRepoCollapsed] = useState(false);
     const [promptsCollapsed, setPromptsCollapsed] = useState(false);
     const [sessionCollapsed, setSessionCollapsed] = useState(false);
-    // Session agent files (worktree-only, not yet promoted to repo)
-    const [sessionAgentFiles, setSessionAgentFiles] = useState<SessionAgentFile[]>([]);
-    const [promotingFile, setPromotingFile] = useState<string | null>(null);
-    const [sessionFilesError, setSessionFilesError] = useState('');
 
     const centralFiles = sortByType(mdFiles.filter((f) => f.scope === 'central'));
     const centralNonPromptFiles = centralFiles.filter((f) => f.type !== 'prompt');
     const promptFiles = centralFiles.filter((f) => f.type === 'prompt');
     const repoFiles = sortByType(mdFiles.filter((f) => f.scope === 'repo'));
+    const sessionFiles = sortByType(mdFiles.filter((f) => f.scope === 'session' && f.session_id === selectedSession?.id));
 
     useEffect(() => {
         if (!selectedRepo && createForScope === 'repo') setCreateForScope(null);
-    }, [createForScope, selectedRepo]);
-
-    useEffect(() => {
-        if (!selectedSession?.worktree_path || !selectedRepo) {
-            setSessionAgentFiles([]);
-            return;
-        }
-        api.repos.sessions.agentFiles.list(selectedRepo.id, selectedSession.id)
-            .then(setSessionAgentFiles)
-            .catch(() => setSessionAgentFiles([]));
-    }, [selectedSession?.id, selectedRepo?.id, mdFiles]);
-
-    const promoteFile = async (agentRelativePath: string) => {
-        if (!selectedRepo || !selectedSession) return;
-        setPromotingFile(agentRelativePath);
-        setSessionFilesError('');
-        try {
-            await api.repos.sessions.agentFiles.promote(
-                selectedRepo.id, selectedSession.id, agentRelativePath,
-            );
-            const freshRepoFiles = await api.mdfiles.list('repo', selectedRepo.id);
-            const { mdFiles: current } = useAppStore.getState();
-            const centralFiles = current.filter((f) => f.scope === 'central');
-            setMdFiles([...centralFiles, ...freshRepoFiles]);
-        } catch (e: unknown) {
-            setSessionFilesError(e instanceof Error ? e.message : 'Failed to promote file');
-        } finally {
-            setPromotingFile(null);
-        }
-    };
+        if (!selectedSession?.worktree_path && createForScope === 'session') setCreateForScope(null);
+    }, [createForScope, selectedRepo, selectedSession?.worktree_path]);
 
     const cancelEditingFile = () => {
         setEditingFileId(null);
@@ -133,7 +112,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
         setRenamingFileId(null);
     };
 
-    const startCreate = (scope: 'central' | 'repo') => {
+    const startCreate = (scope: 'central' | 'repo' | 'session') => {
         setCreateForScope(scope);
         setNewName('');
         setNewType('other');
@@ -141,7 +120,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
         setConfirmDeleteId(null);
     };
 
-    const handleDragOver = (e: React.DragEvent, scope: 'central' | 'repo') => {
+    const handleDragOver = (e: React.DragEvent, scope: 'central' | 'repo' | 'session') => {
         e.preventDefault();
         e.stopPropagation();
         setDragOverScope(scope);
@@ -154,7 +133,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
         }
     };
 
-    const handleDrop = (e: React.DragEvent, scope: 'central' | 'repo') => {
+    const handleDrop = (e: React.DragEvent, scope: 'central' | 'repo' | 'session') => {
         e.preventDefault();
         e.stopPropagation();
         setDragOverScope(null);
@@ -246,6 +225,7 @@ export default function MdFilePanel({ onCollapse }: Props) {
             const file = await api.mdfiles.create({
                 scope: createForScope,
                 repoPath: createForScope === 'repo' ? selectedRepo?.path : undefined,
+                sessionId: createForScope === 'session' ? selectedSession?.id : undefined,
                 filename: newName.trim(),
                 content,
                 type: newType,
@@ -347,7 +327,7 @@ Repo: {{repo}}  \nSession: {{session}}
                 ) : (
                     <>
                         <div className="flex items-center justify-between px-2 py-1.5">
-                            <span className="truncate flex items-center gap-1.5">
+                            <span className={`truncate flex items-center gap-1.5 ${!isActive ? typeTextColor[f.type] : ''}`}>
                                 <span className="opacity-60">{typeIcon[f.type]}</span>
                                 {filename}
                             </span>
@@ -414,7 +394,7 @@ Repo: {{repo}}  \nSession: {{session}}
     };
 
     // Called as a plain function (not a React component) to avoid remount on each render
-    const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo', collapsed: boolean, setCollapsed: (v: boolean) => void) => {
+    const renderSection = (files: MdFile[], label: string, scope: 'central' | 'repo' | 'session', collapsed: boolean, setCollapsed: (v: boolean) => void) => {
         const isCreating = createForScope === scope;
         const isDragOver = dragOverScope === scope;
         return (
@@ -465,6 +445,7 @@ Repo: {{repo}}  \nSession: {{session}}
                                     value={newType}
                                     onChange={(e) => setNewType(e.target.value as MdFile['type'])}
                                 >
+                                    <option value="documentation">Documentation</option>
                                     <option value="skill">Skill</option>
                                     <option value="tool">Tool</option>
                                     <option value="instruction">Instruction</option>
@@ -473,7 +454,7 @@ Repo: {{repo}}  \nSession: {{session}}
                                 </select>
                                 <button
                                     onClick={createFile}
-                                    disabled={creating || (scope === 'repo' && !selectedRepo)}
+                                    disabled={creating || (scope === 'repo' && !selectedRepo) || (scope === 'session' && !selectedSession?.worktree_path)}
                                     className="w-full text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                                 >
                                     {creating ? 'Creating\u2026' : 'Create File'}
@@ -513,58 +494,7 @@ Repo: {{repo}}  \nSession: {{session}}
             <div className="flex-1 p-2 overflow-y-auto">
                 {renderSection(centralNonPromptFiles, 'Central', 'central', centralCollapsed, setCentralCollapsed)}
                 {selectedRepo && renderSection(repoFiles, `Repo: ${selectedRepo.name}`, 'repo', repoCollapsed, setRepoCollapsed)}
-
-                {/* ── Session Files section ────────────────────────── */}
-                {selectedSession?.worktree_path && (
-                    <div className="mb-3">
-                        <div className="flex items-center justify-between gap-2 px-2 mb-1">
-                            <button
-                                onClick={() => setSessionCollapsed(!sessionCollapsed)}
-                                className="flex items-center gap-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest hover:text-gray-300 transition-colors"
-                            >
-                                <svg className={`w-3 h-3 transition-transform ${sessionCollapsed ? '-rotate-90' : ''}`} fill="currentColor" viewBox="0 0 20 20">
-                                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                                </svg>
-                                Session: {selectedSession.name}
-                            </button>
-                        </div>
-                        {!sessionCollapsed && (
-                            <>
-                                {sessionAgentFiles.length === 0 ? (
-                                    <p className="text-xs text-gray-600 px-2 py-1 italic">No session files yet</p>
-                                ) : (
-                                    <div className="space-y-0.5">
-                                        {sessionAgentFiles.map((f) => {
-                                            const filename = f.agentRelativePath.split('/').pop() ?? f.agentRelativePath;
-                                            const isPromoting = promotingFile === f.agentRelativePath;
-                                            return (
-                                                <div
-                                                    key={f.agentRelativePath}
-                                                    className="flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border border-gray-800 bg-gray-900/40 hover:border-gray-700 hover:bg-gray-900/70"
-                                                >
-                                                    <span className="text-xs text-gray-300 truncate" title={f.repoRelativePath}>
-                                                        📄 {filename}
-                                                    </span>
-                                                    <button
-                                                        onClick={() => void promoteFile(f.agentRelativePath)}
-                                                        disabled={isPromoting}
-                                                        title="Promote to repo"
-                                                        className="shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-orange-600/50 bg-orange-600/15 text-orange-300 hover:bg-orange-600/30 hover:text-orange-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    >
-                                                        {isPromoting ? '…' : '↑ Repo'}
-                                                    </button>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
-                                {sessionFilesError && (
-                                    <p className="px-2 mt-1 text-[10px] text-red-400">{sessionFilesError}</p>
-                                )}
-                            </>
-                        )}
-                    </div>
-                )}
+                {selectedSession?.worktree_path && renderSection(sessionFiles, `Session: ${selectedSession.name}`, 'session', sessionCollapsed, setSessionCollapsed)}
 
                 {/* ── Prompt Templates section ─────────────────────── */}
                 <div className="mt-1 mb-3">

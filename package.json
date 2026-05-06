@@ -12,7 +12,7 @@
         "electron:clean": "node -e \"const fs = require('node:fs'); fs.rmSync('install/release', { recursive: true, force: true }); fs.rmSync('packages/electron/release', { recursive: true, force: true });\"",
         "electron:build": "npm run build && npx tsc --project packages/electron/tsconfig.json",
         "electron:pack": "npm run electron:clean && npm run electron:build && npm run pack --workspace=packages/electron",
-        "electron:dist": "npm run electron:clean && npm run electron:build && npm run dist --workspace=packages/electron"
+        "electron:dist": "npm run electron:clean && npm run electron:build && npm run dist --workspace=packages/electron && node scripts/organize-electron-release.cjs"
     },
     "devDependencies": {
         "@electron/rebuild": "^4.0.1",

@@ -86,22 +86,15 @@ CREATE TABLE IF NOT EXISTS repo_usage_rollups (
 
 CREATE TABLE IF NOT EXISTS md_files (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  scope      TEXT    NOT NULL CHECK(scope IN ('central','repo')),
+  scope      TEXT    NOT NULL CHECK(scope IN ('central','repo','session')),
   repo_id    INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
   path       TEXT    NOT NULL,
-  type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','prompt','other')),
+  type       TEXT    NOT NULL CHECK(type IN ('documentation','skill','tool','instruction','prompt','other')),
   content    TEXT    NOT NULL DEFAULT '',
   created_at TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_central_path
-  ON md_files(path)
-  WHERE scope = 'central';
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_repo_path
-  ON md_files(repo_id, path)
-  WHERE scope = 'repo' AND repo_id IS NOT NULL;
 
 -- Repo-level central MD file references (default context for all sessions in a repo)
 CREATE TABLE IF NOT EXISTS repo_md_refs (
@@ -147,4 +140,18 @@ CREATE TABLE IF NOT EXISTS user_action_logs (
   detail     TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+`;
+
+export const MD_FILE_INDEX_SCHEMA = `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_central_path
+  ON md_files(path)
+  WHERE scope = 'central';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_repo_path
+  ON md_files(repo_id, path)
+  WHERE scope = 'repo' AND repo_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_session_path
+  ON md_files(session_id, path)
+  WHERE scope = 'session' AND session_id IS NOT NULL;
 `;

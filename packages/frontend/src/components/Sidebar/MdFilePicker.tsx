@@ -1,6 +1,7 @@
 import type { MdFile } from '../../api/client';
 
 const typeIcon: Record<MdFile['type'], string> = {
+    documentation: '📖',
     skill: '🧠',
     tool: '🔧',
     instruction: '📋',
@@ -52,6 +53,11 @@ export default function MdFilePicker({ files, selected, onChange, label = 'Conte
                             {f.scope === 'repo' && (
                                 <span className="ml-auto shrink-0 text-[9px] font-bold text-gray-600 uppercase tracking-wider">
                                     repo
+                                </span>
+                            )}
+                            {f.scope === 'session' && (
+                                <span className="ml-auto shrink-0 text-[9px] font-bold text-gray-600 uppercase tracking-wider">
+                                    session
                                 </span>
                             )}
                         </label>

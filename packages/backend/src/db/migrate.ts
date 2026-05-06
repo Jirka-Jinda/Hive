@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync } from 'node:fs';
-import { SCHEMA } from './schema';
+import { MD_FILE_INDEX_SCHEMA, SCHEMA } from './schema';
 import { normalizeTerminalText } from '../utils/terminal-text';
 
 function normalizeLogSearchText(output: Buffer | string): string {
@@ -51,36 +51,39 @@ export function migrate(db: Database.Database): void {
     | { sql: string | null }
     | undefined;
   const tableSql = mdFilesTable?.sql ?? '';
-  const needsMdFilesRebuild = /UNIQUE\s*\(\s*scope\s*,\s*path\s*\)/i.test(tableSql) || !tableSql.includes("'prompt'");
+  const needsMdFilesRebuild =
+    /UNIQUE\s*\(\s*scope\s*,\s*path\s*\)/i.test(tableSql) ||
+    !tableSql.includes("'prompt'") ||
+    !tableSql.includes("'documentation'") ||
+    !tableSql.includes("'session'") ||
+    !cols.some((c) => c.name === 'session_id');
 
   if (needsMdFilesRebuild) {
     db.exec(`
       PRAGMA foreign_keys = OFF;
       DROP INDEX IF EXISTS idx_md_files_central_path;
       DROP INDEX IF EXISTS idx_md_files_repo_path;
+      DROP INDEX IF EXISTS idx_md_files_session_path;
       CREATE TABLE IF NOT EXISTS md_files_new (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
-        scope      TEXT    NOT NULL CHECK(scope IN ('central','repo')),
+        scope      TEXT    NOT NULL CHECK(scope IN ('central','repo','session')),
         repo_id    INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+        session_id INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
         path       TEXT    NOT NULL,
-        type       TEXT    NOT NULL CHECK(type IN ('skill','tool','instruction','prompt','other')),
+        type       TEXT    NOT NULL CHECK(type IN ('documentation','skill','tool','instruction','prompt','other')),
         content    TEXT    NOT NULL DEFAULT '',
         created_at TEXT    NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
       );
-      INSERT INTO md_files_new (id, scope, repo_id, path, type, content, created_at, updated_at)
-      SELECT id, scope, repo_id, path, type, content, created_at, updated_at FROM md_files;
+      INSERT INTO md_files_new (id, scope, repo_id, session_id, path, type, content, created_at, updated_at)
+      SELECT id, scope, repo_id, NULL, path, type, content, created_at, updated_at FROM md_files;
       DROP TABLE md_files;
       ALTER TABLE md_files_new RENAME TO md_files;
-      CREATE UNIQUE INDEX idx_md_files_central_path
-        ON md_files(path)
-        WHERE scope = 'central';
-      CREATE UNIQUE INDEX idx_md_files_repo_path
-        ON md_files(repo_id, path)
-        WHERE scope = 'repo' AND repo_id IS NOT NULL;
       PRAGMA foreign_keys = ON;
     `);
   }
+
+  db.exec(MD_FILE_INDEX_SCHEMA);
 
   // Add automation_tasks table for existing DBs
   const taskTable = (db.prepare(

@@ -126,6 +126,7 @@ export default function RepoList() {
         setSessions(sessions);
         setMdFiles([...centralFiles, ...repoMdFiles]);
         setRepoRefs(refs);
+        setSelectedSession(null);
         // Auto-activate the top session (idle first, then working, then stopped)
         if (sessions.length > 0) {
             const order: Record<string, number> = { idle: 0, working: 1, stopped: 2 };
@@ -362,7 +363,7 @@ export default function RepoList() {
             {!showAdd && !pendingRepo && errorMsg && <p className="px-2 pb-2 text-xs text-red-400">{errorMsg}</p>}
 
             <ul className="space-y-0.5">
-                {repos.map((repo) => {
+                {[...repos].sort((a, b) => a.name.localeCompare(b.name)).map((repo) => {
                     const isActive = selectedRepo?.id === repo.id;
                     const isPendingRemove = confirmRemoveId === repo.id;
                     const isEditing = editingRepoId === repo.id;

@@ -2,7 +2,7 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type { WorkspaceService, AgentMdWatchRoot } from '../application/workspace-service';
 import type { NotificationBus } from './notification-bus';
-import { AGENT_MD_DIR, agentRelativePathFromFullPath } from '../utils/agent-md-files';
+import { agentRelativePathFromFullPath, isAgentDirName } from '../utils/agent-md-files';
 
 function normalizePath(path: string): string {
   const normalized = resolve(path);
@@ -107,7 +107,7 @@ export class RepoAgentMdWatcher {
       const rel = relative(rootPath, candidate);
       if (!rel) return true;
       const [firstSegment] = rel.split(/[\\/]/);
-      if (firstSegment?.toLowerCase() === AGENT_MD_DIR) return true;
+      if (firstSegment && isAgentDirName(firstSegment)) return true;
     }
     return false;
   }

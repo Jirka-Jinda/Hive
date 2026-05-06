@@ -12,27 +12,32 @@ export function mdfilesRouter(mdMgr: MdFileManager, workspace: WorkspaceService,
   app.get('/', (c) => {
     const scope = c.req.query('scope');
     const repoIdStr = c.req.query('repoId');
+    const sessionIdStr = c.req.query('sessionId');
     const repoId = repoIdStr ? parseInt(repoIdStr, 10) : undefined;
-    return c.json(mdMgr.list(scope, repoId));
+    const sessionId = sessionIdStr ? parseInt(sessionIdStr, 10) : undefined;
+    return c.json(mdMgr.list(scope, repoId, sessionId));
   });
 
   app.post('/', async (c) => {
     const body = await c.req.json<{
-      scope: 'central' | 'repo';
+      scope: 'central' | 'repo' | 'session';
       repoPath?: string;
+      sessionId?: number;
       filename: string;
       content: string;
       type?: MdFile['type'];
     }>();
 
     return jsonRoute(c, () => {
-      const file = mdMgr.create(body.scope, body.repoPath ?? null, body.filename, body.content, body.type);
+      const file = mdMgr.create(body.scope, body.repoPath ?? null, body.filename, body.content, body.type, body.sessionId);
       logService.logUserAction(
         'create_md_file',
-        `Created "${body.filename}" (${body.type ?? 'other'}) in ${body.scope}${body.repoPath ? ` at ${body.repoPath}` : ''}`,
+        `Created "${body.filename}" (${body.type ?? 'other'}) in ${body.scope}${body.repoPath ? ` at ${body.repoPath}` : ''}${body.sessionId !== undefined ? ` for session ${body.sessionId}` : ''}`,
       );
       if (file.scope === 'repo' && file.repo_id !== null) {
         void workspace.syncRepoFilesToAllWorktrees(file.repo_id);
+      } else if (file.scope === 'session' && file.session_id !== null) {
+        void workspace.syncSessionFilesToWorktree(file.session_id);
       }
       return file;
     }, {
@@ -53,18 +58,22 @@ export function mdfilesRouter(mdMgr: MdFileManager, workspace: WorkspaceService,
         content?: string;
         scope?: MdFile['scope'];
         repoPath?: string;
+        sessionId?: number;
         filename?: string;
         type?: MdFile['type'];
       }>();
       const { file: before } = mdMgr.read(id);
       const updated = mdMgr.update(id, body);
+      if (before.scope === 'repo' && before.repo_id !== null && (updated.scope !== 'repo' || before.path !== updated.path || before.repo_id !== updated.repo_id)) {
+        workspace.deleteRepoFileFromAllWorktrees(before.repo_id, before.path);
+      }
+      if (before.scope === 'session' && before.session_id !== null && (updated.scope !== 'session' || before.path !== updated.path || before.session_id !== updated.session_id)) {
+        workspace.deleteSessionFileFromWorktree(before.session_id, before.path);
+      }
       if (updated.scope === 'repo' && updated.repo_id !== null) {
-        // If the filename changed, remove the old file from disk in the main repo and all worktrees
-        // so that rediscovery doesn't re-import the old path as a new entry.
-        if (body.filename !== undefined && before.path !== updated.path) {
-          workspace.deleteRepoFileFromAllWorktrees(updated.repo_id, before.path);
-        }
         void workspace.syncRepoFilesToAllWorktrees(updated.repo_id);
+      } else if (updated.scope === 'session' && updated.session_id !== null) {
+        void workspace.syncSessionFilesToWorktree(updated.session_id);
       }
       return c.json(updated);
     } catch (error: unknown) {
@@ -80,6 +89,8 @@ export function mdfilesRouter(mdMgr: MdFileManager, workspace: WorkspaceService,
     logService.logUserAction('delete_md_file', `Deleted "${file.path}"`);
     if (file.scope === 'repo' && file.repo_id !== null) {
       workspace.deleteRepoFileFromAllWorktrees(file.repo_id, file.path);
+    } else if (file.scope === 'session' && file.session_id !== null) {
+      workspace.deleteSessionFileFromWorktree(file.session_id, file.path);
     }
     return { ok: true };
   }, { errorStatus: 404 }));

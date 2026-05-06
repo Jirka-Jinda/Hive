@@ -9,9 +9,11 @@
       2. Builds the backend
       3. Compiles the Electron main process (TypeScript)
       4. Clears previous release output so stale artifacts do not remain.
-      5. Packages everything into an installer via electron-builder.
+      5. Packages the Electron release artifacts via electron-builder.
+      6. Organizes the output into `install/release/executable` and `install/release/installation`.
+      7. Copies the repo README into both output folders.
 
-    The finished installer is placed under install/release.
+    The finished release artifacts are placed under install/release.
 #>
 
 Set-StrictMode -Version Latest
@@ -23,4 +25,6 @@ Write-Host "==> Building release package..." -ForegroundColor Cyan
 Set-Location $root
 npm run electron:dist
 
-Write-Host "`n==> Release build complete. Artifacts are in install/release." -ForegroundColor Green
+Write-Host "`n==> Release build complete." -ForegroundColor Green
+Write-Host "    Executable artifacts: install/release/executable" -ForegroundColor Green
+Write-Host "    Installation artifacts: install/release/installation" -ForegroundColor Green

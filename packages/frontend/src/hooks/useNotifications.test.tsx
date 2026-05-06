@@ -62,6 +62,7 @@ describe('useNotifications', () => {
           id: 10,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'existing.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -71,6 +72,7 @@ describe('useNotifications', () => {
           id: 20,
           scope: 'repo',
           repo_id: 2,
+          session_id: null,
           path: 'repo-note.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -81,6 +83,7 @@ describe('useNotifications', () => {
         id: 10,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'existing.md',
         type: 'other',
         created_at: '2026-04-27T00:00:00Z',
@@ -96,6 +99,7 @@ describe('useNotifications', () => {
         id: 11,
         scope: 'central',
         repo_id: null,
+        session_id: null,
         path: 'new-live-file.md',
         type: 'instruction',
         created_at: '2026-04-27T00:00:00Z',
@@ -120,6 +124,7 @@ describe('useNotifications', () => {
           id: 11,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'new-live-file.md',
           type: 'instruction',
           created_at: '2026-04-27T00:00:00Z',
@@ -129,6 +134,7 @@ describe('useNotifications', () => {
           id: 20,
           scope: 'repo',
           repo_id: 2,
+          session_id: null,
           path: 'repo-note.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -147,6 +153,7 @@ describe('useNotifications', () => {
           id: 10,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'existing.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -156,6 +163,7 @@ describe('useNotifications', () => {
           id: 20,
           scope: 'repo',
           repo_id: 2,
+          session_id: null,
           path: 'repo-note.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -170,6 +178,7 @@ describe('useNotifications', () => {
         id: 20,
         scope: 'repo',
         repo_id: 2,
+        session_id: null,
         path: 'repo-note.md',
         type: 'other',
         created_at: '2026-04-27T00:00:00Z',
@@ -179,6 +188,7 @@ describe('useNotifications', () => {
         id: 21,
         scope: 'repo',
         repo_id: 2,
+        session_id: null,
         path: 'sessions/agent-notes.md',
         type: 'instruction',
         created_at: '2026-04-27T00:00:00Z',
@@ -211,6 +221,7 @@ describe('useNotifications', () => {
           id: 10,
           scope: 'central',
           repo_id: null,
+          session_id: null,
           path: 'existing.md',
           type: 'other',
           created_at: '2026-04-27T00:00:00Z',
@@ -220,7 +231,7 @@ describe('useNotifications', () => {
       selectedRepo: { id: 99, name: 'other-repo', path: '/repos/other', source: 'local', git_url: null, is_git_repo: false, created_at: '2026-04-27T00:00:00Z' },
     });
 
-    apiMock.mdfiles.list.mockResolvedValue([{ id: 21, scope: 'repo', repo_id: 2, path: 'new.md', type: 'other', created_at: '', updated_at: '' }]);
+    apiMock.mdfiles.list.mockResolvedValue([{ id: 21, scope: 'repo', repo_id: 2, session_id: null, path: 'new.md', type: 'other', created_at: '', updated_at: '' }]);
 
     render(<Harness />);
 
