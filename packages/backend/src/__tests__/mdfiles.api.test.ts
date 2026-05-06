@@ -132,6 +132,32 @@ describe('MD Files API', () => {
     expect((await res.json()).content).toBe('# Updated\n\nNew content.');
   });
 
+  it('GET /api/mdfiles/:id/revisions — lists saved revisions newest first', async () => {
+    const res = await req(getApp(), `/api/mdfiles/${fileId}/revisions`);
+    expect(res.status).toBe(200);
+
+    const revisions = await res.json() as Array<{ revision_number: number; content: string }>;
+    expect(revisions.map((revision) => revision.revision_number)).toEqual([2, 1]);
+    expect(revisions[0]?.content).toBe('# Updated\n\nNew content.');
+    expect(revisions[1]?.content).toBe('# My Skill\n\nHello world.');
+  });
+
+  it('POST /api/mdfiles/:id/revisions/:rid/restore — restores a previous revision', async () => {
+    const revisionsRes = await req(getApp(), `/api/mdfiles/${fileId}/revisions`);
+    const revisions = await revisionsRes.json() as Array<{ id: number; revision_number: number }>;
+    const originalRevision = revisions.find((revision) => revision.revision_number === 1);
+
+    expect(originalRevision).toBeDefined();
+
+    const restoreRes = await req(getApp(), `/api/mdfiles/${fileId}/revisions/${originalRevision!.id}/restore`, {
+      method: 'POST',
+    });
+    expect(restoreRes.status).toBe(200);
+
+    const readRes = await req(getApp(), `/api/mdfiles/${fileId}`);
+    expect((await readRes.json()).content).toBe('# My Skill\n\nHello world.');
+  });
+
   it('PUT /api/mdfiles/:id — renames the file and auto-appends .md', async () => {
     const res = await req(getApp(), `/api/mdfiles/${fileId}`, {
       method: 'PUT',

@@ -10,15 +10,19 @@ const apiMock = vi.hoisted(() => ({
     sessions: {
       create: vi.fn(),
       update: vi.fn(),
+      archive: vi.fn(),
+      unarchive: vi.fn(),
       delete: vi.fn(),
       restart: vi.fn(),
       list: vi.fn(),
+      context: vi.fn(),
       mdRefs: {
         get: vi.fn(),
         set: vi.fn(),
       },
     },
     git: {
+      changedFiles: vi.fn(),
       branches: {
         list: vi.fn(),
         fetchRemotes: vi.fn(),
@@ -59,6 +63,7 @@ describe('SessionList', () => {
           head_ref: 'existing-branch',
           is_detached: false,
           sort_order: 0,
+          archived_at: null,
           created_at: '2026-04-27T00:00:00Z',
           updated_at: '2026-04-27T00:00:00Z',
         },
@@ -77,6 +82,7 @@ describe('SessionList', () => {
           head_ref: 'feature/long-queued-session-name',
           is_detached: false,
           sort_order: 1,
+          archived_at: null,
           created_at: '2026-04-27T00:00:00Z',
           updated_at: '2026-04-27T00:00:00Z',
         },
@@ -96,6 +102,7 @@ describe('SessionList', () => {
         head_ref: 'existing-branch',
         is_detached: false,
         sort_order: 0,
+        archived_at: null,
         created_at: '2026-04-27T00:00:00Z',
         updated_at: '2026-04-27T00:00:00Z',
       },
@@ -134,6 +141,27 @@ describe('SessionList', () => {
         updated_at: '2026-04-27T00:00:00Z',
       },
     ]);
+    apiMock.repos.sessions.context.mockResolvedValue({
+      items: [
+        {
+          order: 0,
+          basename: 'session-context.md',
+          source: 'repo-ref',
+          content: '# Session context',
+          file: {
+            id: 201,
+            scope: 'central',
+            repo_id: null,
+            session_id: null,
+            path: 'session-context.md',
+            type: 'instruction',
+            created_at: '2026-04-27T00:00:00Z',
+            updated_at: '2026-04-27T00:00:00Z',
+          },
+        },
+      ],
+      preamble: '=== session-context.md ===\n# Session context\n\n',
+    });
     apiMock.repos.sessions.mdRefs.set.mockResolvedValue({ ok: true });
     apiMock.repos.sessions.update.mockResolvedValue({
       id: 11,
@@ -149,6 +177,8 @@ describe('SessionList', () => {
       current_branch: 'existing-branch',
       head_ref: 'existing-branch',
       is_detached: false,
+      sort_order: 0,
+      archived_at: null,
       created_at: '2026-04-27T00:00:00Z',
       updated_at: '2026-04-27T00:00:00Z',
     });
@@ -166,10 +196,51 @@ describe('SessionList', () => {
       current_branch: 'existing-branch',
       head_ref: 'existing-branch',
       is_detached: false,
+      sort_order: 0,
+      archived_at: null,
       created_at: '2026-04-27T00:00:00Z',
       updated_at: '2026-04-27T00:00:00Z',
     });
+    apiMock.repos.sessions.archive.mockResolvedValue({
+      id: 11,
+      repo_id: 1,
+      agent_type: 'claude',
+      credential_id: null,
+      name: 'Alpha Session',
+      status: 'running',
+      state: 'idle',
+      branch_mode: 'existing',
+      initial_branch_name: 'existing-branch',
+      worktree_path: 'C:/worktrees/alpha-session',
+      current_branch: 'existing-branch',
+      head_ref: 'existing-branch',
+      is_detached: false,
+      sort_order: 0,
+      archived_at: '2026-04-28T00:00:00Z',
+      created_at: '2026-04-27T00:00:00Z',
+      updated_at: '2026-04-28T00:00:00Z',
+    });
+    apiMock.repos.sessions.unarchive.mockResolvedValue({
+      id: 11,
+      repo_id: 1,
+      agent_type: 'claude',
+      credential_id: null,
+      name: 'Alpha Session',
+      status: 'running',
+      state: 'idle',
+      branch_mode: 'existing',
+      initial_branch_name: 'existing-branch',
+      worktree_path: 'C:/worktrees/alpha-session',
+      current_branch: 'existing-branch',
+      head_ref: 'existing-branch',
+      is_detached: false,
+      sort_order: 0,
+      archived_at: null,
+      created_at: '2026-04-27T00:00:00Z',
+      updated_at: '2026-04-28T00:00:00Z',
+    });
     apiMock.repos.sessions.list.mockResolvedValue([]);
+    apiMock.repos.git.changedFiles.mockResolvedValue([]);
     apiMock.repos.git.branches.fetchRemotes.mockResolvedValue({ ok: true });
     apiMock.repos.git.branches.list.mockResolvedValue([
       {
@@ -267,6 +338,34 @@ describe('SessionList', () => {
     expect(useAppStore.getState().sessions[0]?.name).toBe('Renamed Session');
   });
 
+  it('shows selected session context files without the resolved context box', async () => {
+    render(<SessionList />);
+
+    expect(await screen.findByText('session-context.md')).toBeInTheDocument();
+    expect(screen.queryByText('Resolved Context')).not.toBeInTheDocument();
+  });
+
+  it('archives and restores a session', async () => {
+    const user = userEvent.setup();
+    render(<SessionList />);
+
+    const row = screen.getByText('Alpha Session').closest('li');
+    expect(row).not.toBeNull();
+
+    await user.click(within(row!).getByRole('button', { name: 'Archive session' }));
+
+    await waitFor(() => {
+      expect(apiMock.repos.sessions.archive).toHaveBeenCalledWith(1, 11);
+    });
+    expect(screen.getAllByText('Archived').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Restore session' }));
+
+    await waitFor(() => {
+      expect(apiMock.repos.sessions.unarchive).toHaveBeenCalledWith(1, 11);
+    });
+  });
+
   it('creates a new git session on a new branch', async () => {
     const user = userEvent.setup();
     apiMock.repos.sessions.create.mockResolvedValue({
@@ -283,6 +382,8 @@ describe('SessionList', () => {
       current_branch: 'feature/new-session',
       head_ref: 'feature/new-session',
       is_detached: false,
+      sort_order: 0,
+      archived_at: null,
       created_at: '2026-04-27T00:00:00Z',
       updated_at: '2026-04-27T00:00:00Z',
     });
@@ -323,6 +424,8 @@ describe('SessionList', () => {
       current_branch: 'main',
       head_ref: 'main',
       is_detached: false,
+      sort_order: 0,
+      archived_at: null,
       created_at: '2026-04-27T00:00:00Z',
       updated_at: '2026-04-27T00:00:00Z',
     });
@@ -376,6 +479,8 @@ describe('SessionList', () => {
       current_branch: 'available-branch',
       head_ref: 'available-branch',
       is_detached: false,
+      sort_order: 0,
+      archived_at: null,
       created_at: '2026-04-27T00:00:00Z',
       updated_at: '2026-04-27T00:00:00Z',
     });

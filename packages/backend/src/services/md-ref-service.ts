@@ -7,6 +7,12 @@ export interface ResolvedMdFile {
   content: string;
 }
 
+export interface ResolvedSessionContextItem extends ResolvedMdFile {
+  order: number;
+  basename: string;
+  source: 'repo-ref' | 'repo-override' | 'session-ref';
+}
+
 export class MdRefService {
   constructor(private db: Database.Database) {}
 
@@ -70,6 +76,10 @@ export class MdRefService {
    * Files are deduplicated by basename — higher priority wins.
    */
   resolveSessionContext(sessionId: number, repoId: number): ResolvedMdFile[] {
+    return this.resolveSessionContextDetailed(sessionId, repoId).map(({ file, content }) => ({ file, content }));
+  }
+
+  resolveSessionContextDetailed(sessionId: number, repoId: number): ResolvedSessionContextItem[] {
     const repoRefs = this.getRepoRefs(repoId);
     const sessionRefs = this.getSessionRefs(sessionId);
     const repoScopedFiles = this.db
@@ -77,26 +87,37 @@ export class MdRefService {
       .all('repo', repoId) as MdFile[];
 
     // Map keyed by basename — fill in priority order (lowest first)
-    const resolved = new Map<string, MdFile>();
+    const resolved = new Map<string, { file: MdFile; source: ResolvedSessionContextItem['source'] }>();
 
     // 1. Repo-level central refs (lowest priority)
-    for (const f of repoRefs) resolved.set(basename(f.path), f);
+    for (const f of repoRefs) resolved.set(basename(f.path), { file: f, source: 'repo-ref' });
 
     // 2. Repo-scoped file overrides central ref of same basename
     for (const rf of repoScopedFiles) {
-      if (resolved.has(basename(rf.path))) resolved.set(basename(rf.path), rf);
+      if (resolved.has(basename(rf.path))) {
+        resolved.set(basename(rf.path), { file: rf, source: 'repo-override' });
+      }
     }
 
     // 3. Session-level refs override everything (highest priority)
-    for (const sf of sessionRefs) resolved.set(basename(sf.path), sf);
+    for (const sf of sessionRefs) resolved.set(basename(sf.path), { file: sf, source: 'session-ref' });
 
-    const result: ResolvedMdFile[] = [];
-    for (const file of resolved.values()) {
+    const result: ResolvedSessionContextItem[] = [];
+    let order = 0;
+    for (const [key, value] of resolved.entries()) {
+      const file = value.file;
       const row = this.db
         .prepare('SELECT content FROM md_files WHERE id = ?')
         .get(file.id) as { content: string } | undefined;
       if (row !== undefined) {
-        result.push({ file, content: row.content });
+        result.push({
+          file,
+          content: row.content,
+          order,
+          basename: key,
+          source: value.source,
+        });
+        order += 1;
       }
     }
     return result;

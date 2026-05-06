@@ -4,10 +4,10 @@ import type { MdRefService } from '../../services/md-ref-service';
 /**
  * MD Context Node
  *
- * Runs at session-start only.
+ * Resolves at session-start only.
  * Resolves the effective set of MD files linked to the repo/session and
- * formats them as a preamble that is typed into the PTY before the user
- * starts interacting with the agent.
+ * formats them as a preamble that is merged into the first real input sent
+ * to the agent.
  *
  * Priority (highest wins when filenames clash):
  *   session-level refs > repo-scoped files (same basename) > repo-level central refs
@@ -16,7 +16,7 @@ export function createMdContextNode(mdRefService: MdRefService): PipelineNode {
   return {
     id: 'md-context',
     name: 'MD File Context',
-    description: 'Injects linked MD files as a context preamble when a session starts.',
+    description: 'Appends linked MD files to the first input sent in a session.',
     phases: ['session-start'],
     defaultEnabled: true,
 

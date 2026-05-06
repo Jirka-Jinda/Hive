@@ -3,6 +3,7 @@ import type { WorkspaceService } from '../application/workspace-service';
 import type { MdRefService } from '../services/md-ref-service';
 import type { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { getProcess } from '../services/process-manager';
+import { mergePendingSessionInput } from '../services/pending-session-input';
 import { jsonRoute, parseIdParam } from './route-utils';
 
 export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefService, pipelineRegistry?: PipelineRegistry): Hono {
@@ -113,7 +114,9 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
   }, { errorStatus: 400 }));
 
   // --- Sessions sub-resource ---
-  app.get('/:id/sessions', (c) => jsonRoute(c, () => workspace.listSessions(parseIdParam(c, 'id')), { errorStatus: 404 }));
+  app.get('/:id/sessions', (c) => jsonRoute(c, () => {
+    return workspace.listSessions(parseIdParam(c, 'id'), c.req.query('includeArchived') === 'true');
+  }, { errorStatus: 404 }));
 
   app.put('/:id/sessions/reorder', async (c) => {
     const repoId = parseIdParam(c, 'id');
@@ -166,6 +169,14 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     return jsonRoute(c, () => workspace.updateSession(repoId, sessionId, { name: body.name! }), { errorStatus: 404 });
   });
 
+  app.post('/:id/sessions/:sid/archive', (c) => {
+    return jsonRoute(c, () => workspace.archiveSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid')), { errorStatus: 404 });
+  });
+
+  app.post('/:id/sessions/:sid/unarchive', (c) => {
+    return jsonRoute(c, () => workspace.unarchiveSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid')), { errorStatus: 404 });
+  });
+
   app.post('/:id/sessions/:sid/restart', (c) => {
     return jsonRoute(c, () => workspace.restartSession(parseIdParam(c, 'id'), parseIdParam(c, 'sid')), { errorStatus: 404 });
   });
@@ -215,6 +226,17 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
     return c.json({ ok: true });
   });
 
+  app.get('/:id/sessions/:sid/context', (c) => jsonRoute(c, () => {
+    const repoId = parseIdParam(c, 'id');
+    const sessionId = parseIdParam(c, 'sid');
+    workspace.getSession(repoId, sessionId);
+    const items = mdRefService.resolveSessionContextDetailed(sessionId, repoId);
+    return {
+      items,
+      preamble: mdRefService.buildPreamble(items),
+    };
+  }, { errorStatus: 404 }));
+
   app.post('/:id/sessions/:sid/inject', async (c) => {
     const repoId = parseIdParam(c, 'id');
     const sessionId = parseIdParam(c, 'sid');
@@ -226,7 +248,7 @@ export function reposRouter(workspace: WorkspaceService, mdRefService: MdRefServ
       const text = pipelineRegistry
         ? await pipelineRegistry.run('user-input', body.text, { sessionId, repoId })
         : body.text;
-      proc.pty.write(text);
+      proc.pty.write(await mergePendingSessionInput(sessionId, text));
       return { ok: true };
     }, { errorStatus: 404 });
   });

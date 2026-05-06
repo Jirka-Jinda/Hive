@@ -10,6 +10,17 @@ export interface AppSettings {
   auth: AuthSettings;
 }
 
+export type BackendReadinessStatus = 'starting' | 'ready' | 'migration-failed' | 'fatal-error';
+export type BackendConnectionState = 'connected' | 'reconnecting' | 'disconnected' | 'backend-unavailable';
+
+export interface BackendReadiness {
+  status: BackendReadinessStatus;
+  db: 'pending' | 'ok' | 'failed';
+  migrations: 'pending' | 'ok' | 'failed';
+  message: string | null;
+  timestamp: string;
+}
+
 export type PipelinePhase = 'session-start' | 'user-input' | 'agent-output';
 
 export interface PipelineNodeDto {
@@ -88,6 +99,7 @@ export interface Session {
   head_ref?: string | null;
   is_detached?: boolean;
   sort_order: number;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -160,6 +172,28 @@ export interface MdFile {
   updated_at: string;
 }
 
+export interface MdFileRevision {
+  id: number;
+  md_file_id: number;
+  revision_number: number;
+  content: string;
+  author_source: string | null;
+  created_at: string;
+}
+
+export interface SessionContextItem {
+  order: number;
+  basename: string;
+  source: 'repo-ref' | 'repo-override' | 'session-ref';
+  content: string;
+  file: MdFile;
+}
+
+export interface SessionContextResponse {
+  items: SessionContextItem[];
+  preamble: string;
+}
+
 export interface SessionAgentFile {
   agentRelativePath: string;
   repoRelativePath: string;
@@ -189,8 +223,50 @@ export interface AutomationTask {
   cron: string;
   params: string; // JSON Record<string,string>
   enabled: number; // 0 | 1
+  last_run_started_at: string | null;
   last_run_at: string | null;
+  last_run_finished_at: string | null;
+  last_run_duration_ms: number | null;
+  last_run_status: 'running' | 'success' | 'failed' | null;
+  last_error: string | null;
+  last_output_summary: string | null;
+  consecutive_failures: number;
   next_run_at: string | null;
+  created_at: string;
+}
+
+export interface AutomationTaskRun {
+  id: number;
+  task_id: number;
+  trigger: 'schedule' | 'manual';
+  status: 'success' | 'failed';
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  error_message: string | null;
+  output_summary: string | null;
+}
+
+export type ChangeEventType =
+  | 'mdfile-created'
+  | 'mdfile-updated'
+  | 'mdfile-moved'
+  | 'mdfile-deleted'
+  | 'mdfile-restored'
+  | 'automation-ran'
+  | 'automation-failed';
+
+export interface ChangeEvent {
+  id: number;
+  event_type: ChangeEventType;
+  scope: MdFile['scope'] | null;
+  repo_id: number | null;
+  session_id: number | null;
+  md_file_id: number | null;
+  automation_task_id: number | null;
+  path: string | null;
+  title: string;
+  summary: string | null;
   created_at: string;
 }
 
@@ -238,11 +314,20 @@ export const api = {
       request<{ ok: boolean }>(`/repos/${id}?deleteFromDisk=${deleteFromDisk}`, { method: 'DELETE' }),
 
     sessions: {
-      list: (repoId: number) => request<Session[]>(`/repos/${repoId}/sessions`),
+      list: (repoId: number, options?: { includeArchived?: boolean }) => {
+        const params = new URLSearchParams();
+        if (options?.includeArchived) params.set('includeArchived', 'true');
+        const qs = params.toString();
+        return request<Session[]>(`/repos/${repoId}/sessions${qs ? `?${qs}` : ''}`);
+      },
       create: (repoId: number, body: { name: string; agentType: string; credentialId?: number; branchMode?: SessionBranchMode; branchName?: string }) =>
         request<Session>(`/repos/${repoId}/sessions`, { method: 'POST', body: JSON.stringify(body) }),
       update: (repoId: number, sid: number, body: { name: string }) =>
         request<Session>(`/repos/${repoId}/sessions/${sid}`, { method: 'PUT', body: JSON.stringify(body) }),
+      archive: (repoId: number, sid: number) =>
+        request<Session>(`/repos/${repoId}/sessions/${sid}/archive`, { method: 'POST' }),
+      unarchive: (repoId: number, sid: number) =>
+        request<Session>(`/repos/${repoId}/sessions/${sid}/unarchive`, { method: 'POST' }),
       delete: (repoId: number, sid: number) =>
         request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}`, { method: 'DELETE' }),
       restart: (repoId: number, sid: number) =>
@@ -269,6 +354,8 @@ export const api = {
             body: JSON.stringify({ mdFileIds }),
           }),
       },
+      context: (repoId: number, sid: number) =>
+        request<SessionContextResponse>(`/repos/${repoId}/sessions/${sid}/context`),
       inject: (repoId: number, sid: number, text: string) =>
         request<{ ok: boolean }>(`/repos/${repoId}/sessions/${sid}/inject`, {
           method: 'POST',
@@ -379,6 +466,15 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ params }),
       }),
+    revisions: {
+      list: (id: number) => request<MdFileRevision[]>(`/mdfiles/${id}/revisions`),
+      get: (id: number, revisionId: number) => request<MdFileRevision>(`/mdfiles/${id}/revisions/${revisionId}`),
+      restore: (id: number, revisionId: number) => request<MdFile>(`/mdfiles/${id}/revisions/${revisionId}/restore`, { method: 'POST' }),
+    },
+  },
+
+  system: {
+    readiness: () => request<BackendReadiness>('/readiness'),
   },
 
   settings: {
@@ -401,11 +497,24 @@ export const api = {
 
   automation: {
     list: () => request<AutomationTask[]>('/automation'),
+    runs: (id: number, limit = 10) => request<AutomationTaskRun[]>(`/automation/${id}/runs?limit=${limit}`),
     create: (body: { name: string; md_file_id: number; session_id: number; cron: string; params?: Record<string, string> }) =>
       request<AutomationTask>('/automation', { method: 'POST', body: JSON.stringify(body) }),
+    run: (id: number) => request<AutomationTask>(`/automation/${id}/run`, { method: 'POST' }),
     pause: (id: number) => request<AutomationTask>(`/automation/${id}/pause`, { method: 'PUT' }),
     resume: (id: number) => request<AutomationTask>(`/automation/${id}/resume`, { method: 'PUT' }),
     delete: (id: number) => request<{ ok: boolean }>(`/automation/${id}`, { method: 'DELETE' }),
+  },
+
+  changes: {
+    list: (options?: { limit?: number; repoId?: number; sessionId?: number }) => {
+      const params = new URLSearchParams();
+      if (options?.limit !== undefined) params.set('limit', String(options.limit));
+      if (options?.repoId !== undefined) params.set('repoId', String(options.repoId));
+      if (options?.sessionId !== undefined) params.set('sessionId', String(options.sessionId));
+      const qs = params.toString();
+      return request<ChangeEvent[]>(`/changes${qs ? `?${qs}` : ''}`);
+    },
   },
 
   usage: {

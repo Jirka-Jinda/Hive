@@ -313,6 +313,43 @@ describe('Repos API', () => {
       expect((await sessionRefs.json()).map((file: { id: number }) => file.id)).toEqual([sessionMdFileId]);
     });
 
+    it('GET /api/repos/:id/sessions/:sid/context — returns resolved context with source details', async () => {
+      const repoOverrideRes = await req(getApp(), '/api/mdfiles', {
+        method: 'POST',
+        body: {
+          scope: 'repo',
+          repoPath,
+          filename: 'repo-context-repos-api.md',
+          content: '# Repo Override',
+          type: 'instruction',
+        },
+      });
+      expect(repoOverrideRes.status).toBe(201);
+
+      const res = await req(getApp(), `/api/repos/${repoId}/sessions/${sessionId}/context`);
+      expect(res.status).toBe(200);
+
+      const context = await res.json() as {
+        items: Array<{ basename: string; source: string; content: string }>;
+        preamble: string;
+      };
+
+      expect(context.items).toEqual([
+        expect.objectContaining({
+          basename: 'repo-context-repos-api.md',
+          source: 'repo-override',
+          content: '# Repo Override',
+        }),
+        expect.objectContaining({
+          basename: 'session-context-repos-api.md',
+          source: 'session-ref',
+          content: '# Session Context',
+        }),
+      ]);
+      expect(context.preamble).toContain('=== repo-context-repos-api.md ===');
+      expect(context.preamble).toContain('=== session-context-repos-api.md ===');
+    });
+
     it('PUT /api/repos/:id/sessions/:sid — updates session name', async () => {
       const res = await req(getApp(), `/api/repos/${repoId}/sessions/${sessionId}`, {
         method: 'PUT',
@@ -387,6 +424,34 @@ describe('Repos API', () => {
       expect((await res.json()).error).toMatch(/does not belong to repo/i);
 
       await req(getApp(), `/api/repos/${otherRepoId}`, { method: 'DELETE' });
+    });
+
+    it('POST /api/repos/:id/sessions/:sid/archive — hides the session from the default list', async () => {
+      const archiveRes = await req(getApp(), `/api/repos/${repoId}/sessions/${sessionId}/archive`, {
+        method: 'POST',
+      });
+      expect(archiveRes.status).toBe(200);
+      expect((await archiveRes.json()).archived_at).toBeTruthy();
+
+      const activeListRes = await req(getApp(), `/api/repos/${repoId}/sessions`);
+      const activeSessions = await activeListRes.json() as Array<{ id: number }>;
+      expect(activeSessions.some((session) => session.id === sessionId)).toBe(false);
+
+      const allListRes = await req(getApp(), `/api/repos/${repoId}/sessions?includeArchived=true`);
+      const allSessions = await allListRes.json() as Array<{ id: number; archived_at: string | null }>;
+      expect(allSessions.some((session) => session.id === sessionId && Boolean(session.archived_at))).toBe(true);
+    });
+
+    it('POST /api/repos/:id/sessions/:sid/unarchive — returns the session to the active list', async () => {
+      const unarchiveRes = await req(getApp(), `/api/repos/${repoId}/sessions/${sessionId}/unarchive`, {
+        method: 'POST',
+      });
+      expect(unarchiveRes.status).toBe(200);
+      expect((await unarchiveRes.json()).archived_at).toBeNull();
+
+      const activeListRes = await req(getApp(), `/api/repos/${repoId}/sessions`);
+      const activeSessions = await activeListRes.json() as Array<{ id: number }>;
+      expect(activeSessions.some((session) => session.id === sessionId)).toBe(true);
     });
 
     it('DELETE /api/repos/:id/sessions/:sid — 200 with ok', async () => {

@@ -8,6 +8,7 @@ import type { NotificationBus } from '../services/notification-bus';
 import { spawnAgent, getProcess, drainProcessOutputBacklog } from '../services/process-manager';
 import type { ProcessEntry } from '../services/process-manager';
 import { AGENT_ADAPTERS } from '../services/agents';
+import { clearPendingSessionInput, mergePendingSessionInput, primePendingSessionInput } from '../services/pending-session-input';
 import { getErrorMessage } from '../utils/errors';
 
 interface SessionOutputStream {
@@ -98,6 +99,7 @@ export function setupWebSocketServer(
     };
 
     stream.onExit = () => {
+      clearPendingSessionInput(sessionId);
       try {
         sessionStore.setStatus(sessionId, 'stopped');
         sessionStore.setState(sessionId, 'stopped');
@@ -176,16 +178,12 @@ export function setupWebSocketServer(
       sessionStore.setState(sessionId, 'working');
       notificationBus.emitSessionState({ sessionId, repoId: session.repo_id, state: 'working', sessionName: session.name });
 
-      // Run the session-start pipeline (e.g. injects MD file context preamble).
-      // We wait briefly so the CLI can initialise its prompt before receiving input.
-      void pipelineRegistry.run('session-start', '', { sessionId, repoId: session.repo_id }).then((startup) => {
-        if (startup) {
-          setTimeout(() => {
-            const proc = getProcess(sessionId);
-            if (proc) proc.pty.write(startup);
-          }, 350);
-        }
-      });
+      // Resolve session-start payload up front, but hold it until the first real
+      // input so it is not pasted into the visible terminal prompt on startup.
+      primePendingSessionInput(
+        sessionId,
+        pipelineRegistry.run('session-start', '', { sessionId, repoId: session.repo_id }),
+      );
     }
 
     const stream = ensureStream(sessionId, session.repo_id, session.name, entry);
@@ -225,11 +223,13 @@ export function setupWebSocketServer(
         // Not JSON — treat as terminal input
       }
       void pipelineRegistry.run('user-input', raw.toString(), { sessionId, repoId: session.repo_id })
-        .then((transformed) => {
-          entry!.pty.write(transformed);
+        .then((transformed) => mergePendingSessionInput(sessionId, transformed))
+        .then((mergedInput) => {
+          entry!.pty.write(mergedInput);
         })
-        .catch(() => {
-          entry!.pty.write(raw.toString());
+        .catch(async () => {
+          const mergedInput = await mergePendingSessionInput(sessionId, raw.toString());
+          entry!.pty.write(mergedInput);
         });
     });
 

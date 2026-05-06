@@ -59,6 +59,14 @@ function DiffIcon() {
     );
 }
 
+function ArchiveIcon() {
+    return (
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M7 10v7m5-7v7m5-7v7M6 7l1 12h10l1-12M9 4h6l1 3H8l1-3z" />
+        </svg>
+    );
+}
+
 function ActionButton({
     title,
     onClick,
@@ -114,15 +122,17 @@ export default function SessionList() {
     const [selectedRefs, setSelectedRefs] = useState<number[]>([]);
     const [creating, setCreating] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
-    // Active session context display
     const [sessionRefs, setSessionRefs] = useState<MdFile[]>([]);
     const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<number | null>(null);
     const [deletingSession, setDeletingSession] = useState(false);
+    const [loadingDeleteDetailsId, setLoadingDeleteDetailsId] = useState<number | null>(null);
+    const [dirtySessionCounts, setDirtySessionCounts] = useState<Record<number, number>>({});
     const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
     const [editingSessionName, setEditingSessionName] = useState('');
     const [editingSessionRefs, setEditingSessionRefs] = useState<number[]>([]);
     const [savingEdit, setSavingEdit] = useState(false);
     const [restartingSessionId, setRestartingSessionId] = useState<number | null>(null);
+    const [archivingSessionId, setArchivingSessionId] = useState<number | null>(null);
     const [refreshingSessions, setRefreshingSessions] = useState(false);
     const [branchMode, setBranchMode] = useState<SessionBranchMode>('new');
     const [branchName, setBranchName] = useState('');
@@ -135,10 +145,28 @@ export default function SessionList() {
     const dragSessionId = useRef<number | null>(null);
 
     useEffect(() => {
-        if (!selectedSession || !selectedRepo) { setSessionRefs([]); return; }
+        if (!selectedSession || !selectedRepo) {
+            setSessionRefs([]);
+            return;
+        }
+
+        let cancelled = false;
+
         api.repos.sessions.mdRefs.get(selectedRepo.id, selectedSession.id)
-            .then(setSessionRefs)
-            .catch(() => setSessionRefs([]));
+            .then((refs) => {
+                if (!cancelled) {
+                    setSessionRefs(refs);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setSessionRefs([]);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
     }, [selectedSession?.id, selectedRepo?.id]);
 
     // Trigger a remote fetch once when the user switches to "existing" mode
@@ -198,7 +226,7 @@ export default function SessionList() {
         setRefreshingSessions(true);
         setErrorMsg('');
         try {
-            const nextSessions = await api.repos.sessions.list(selectedRepo.id);
+            const nextSessions = await api.repos.sessions.list(selectedRepo.id, { includeArchived: true });
             setSessions(nextSessions);
             if (selectedSession) {
                 setSelectedSession(nextSessions.find((session) => session.id === selectedSession.id) ?? null);
@@ -271,7 +299,7 @@ export default function SessionList() {
             setSessionRefs(refs);
             setEditingSessionRefs(refs.map((file) => file.id));
         } catch {
-            setEditingSessionRefs(sessionRefs.map((file) => file.id));
+            setEditingSessionRefs([]);
         }
         setEditingSessionId(session.id);
         setEditingSessionName(session.name);
@@ -324,6 +352,43 @@ export default function SessionList() {
         }
     };
 
+    const toggleSessionArchive = async (session: Session) => {
+        if (!selectedRepo) return;
+
+        setArchivingSessionId(session.id);
+        setErrorMsg('');
+        try {
+            const updatedSession = session.archived_at
+                ? await api.repos.sessions.unarchive(selectedRepo.id, session.id)
+                : await api.repos.sessions.archive(selectedRepo.id, session.id);
+            updateSession(updatedSession);
+            if (selectedSession?.id === session.id) {
+                setSelectedSession(updatedSession);
+            }
+        } catch (e: unknown) {
+            setErrorMsg(e instanceof Error ? e.message : 'Failed to update session archive state');
+        } finally {
+            setArchivingSessionId(null);
+        }
+    };
+
+    const prepareDeleteSession = async (session: Session) => {
+        setConfirmDeleteSessionId(session.id);
+        if (!selectedRepo.is_git_repo || !session.worktree_path) {
+            return;
+        }
+
+        setLoadingDeleteDetailsId(session.id);
+        try {
+            const changedFiles = await api.repos.git.changedFiles(selectedRepo.id, session.id);
+            setDirtySessionCounts((current) => ({ ...current, [session.id]: changedFiles.length }));
+        } catch {
+            setDirtySessionCounts((current) => ({ ...current, [session.id]: 0 }));
+        } finally {
+            setLoadingDeleteDetailsId((current) => (current === session.id ? null : current));
+        }
+    };
+
     const handleDragStart = (sessionId: number) => {
         dragSessionId.current = sessionId;
     };
@@ -364,6 +429,224 @@ export default function SessionList() {
     const handleDragEnd = () => {
         dragSessionId.current = null;
         setDragOverId(null);
+    };
+
+    const orderedSessions = [...sessions].sort((a, b) => a.sort_order - b.sort_order);
+    const activeSessions = orderedSessions.filter((session) => !session.archived_at);
+    const archivedSessions = orderedSessions.filter((session) => Boolean(session.archived_at));
+
+    const renderSessionRow = (session: Session) => {
+        const isActive = selectedSession?.id === session.id;
+        const isDiffActive =
+            activeDiffTarget?.repoId === selectedRepo.id &&
+            activeDiffTarget.sessionId === session.id;
+        const isEditing = editingSessionId === session.id;
+        const branchLabel = getSessionBranchLabel(session);
+        const stateMeta = getSessionStateMeta(session.state);
+        const dirtyCount = dirtySessionCounts[session.id];
+        const isArchived = Boolean(session.archived_at);
+
+        return (
+            <li
+                key={session.id}
+                draggable={!isArchived}
+                onDragStart={() => handleDragStart(session.id)}
+                onDragOver={(e) => handleDragOver(e, session.id)}
+                onDrop={(e) => { void handleDrop(e, session.id); }}
+                onDragEnd={handleDragEnd}
+                onClick={() => setSelectedSession(isActive ? null : session)}
+                className={`group rounded-lg border cursor-pointer text-sm transition-all ${dragOverId === session.id
+                    ? 'border-orange-400/60 bg-orange-600/10 scale-[0.98]'
+                    : isArchived
+                        ? 'border-gray-800/80 bg-gray-950/60 text-gray-400 hover:border-gray-700 hover:bg-gray-950/80'
+                        : isActive
+                            ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
+                            : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
+                    }`}
+            >
+                <div className="px-2.5 py-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                        <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${isArchived ? 'bg-gray-600 shadow-[0_0_0_1px_rgba(107,114,128,0.35)]' : stateMeta.dotClass} ${isActive ? 'ring-2 ring-black/45 ring-offset-1 ring-offset-orange-700/80' : ''}`} />
+                        <span className={`flex-1 min-w-0 whitespace-normal break-words text-sm leading-5 font-medium ${isArchived
+                            ? 'text-gray-300'
+                            : isActive
+                                ? 'text-white'
+                                : 'text-gray-100'
+                            }`}>
+                            {session.name}
+                        </span>
+                    </div>
+
+                    <div className="mt-2 min-h-[1.5rem] flex flex-wrap items-center gap-1">
+                        <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${branchLabel
+                            ? isActive
+                                ? 'border-orange-400/40 bg-orange-500/10 text-orange-100'
+                                : 'border-gray-700 bg-gray-800/90 text-gray-300'
+                            : isActive
+                                ? 'border-white/10 bg-black/20 text-gray-200'
+                                : 'border-gray-800 bg-gray-900/60 text-gray-500'
+                            }`}>
+                            <span className="truncate">{branchLabel ?? 'No branch'}</span>
+                        </span>
+                        {isArchived && (
+                            <span className="inline-flex items-center rounded-full border border-gray-700 bg-gray-900/60 px-2 py-0.5 text-[10px] font-medium text-gray-400">
+                                Archived
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="mt-2 flex items-start justify-between gap-2">
+                        <span className={`text-xs leading-6 ${isActive ? 'text-orange-100' : 'text-gray-400'}`}>
+                            {session.agent_type}
+                        </span>
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            {!isArchived && (
+                                <ActionButton
+                                    title={selectedRepo.is_git_repo
+                                        ? isDiffActive
+                                            ? 'Hide file diffs'
+                                            : 'View file diffs'
+                                        : 'File diffs require a git repository'}
+                                    disabled={!selectedRepo.is_git_repo}
+                                    active={isDiffActive}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleDiffTarget(selectedRepo.id, session.id);
+                                    }}
+                                >
+                                    <DiffIcon />
+                                </ActionButton>
+                            )}
+                            {!isArchived && (
+                                <ActionButton
+                                    title="Restart session"
+                                    disabled={restartingSessionId === session.id}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        void restartSession(session);
+                                    }}
+                                >
+                                    <RefreshIcon spinning={restartingSessionId === session.id} />
+                                </ActionButton>
+                            )}
+                            {!isArchived && (
+                                <ActionButton
+                                    title="Update session"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isEditing) {
+                                            cancelEditingSession();
+                                            return;
+                                        }
+                                        void startEditingSession(session);
+                                    }}
+                                >
+                                    <EditIcon />
+                                </ActionButton>
+                            )}
+                            <ActionButton
+                                title={isArchived ? 'Restore session' : 'Archive session'}
+                                disabled={archivingSessionId === session.id}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void toggleSessionArchive(session);
+                                }}
+                            >
+                                {isArchived ? <span className="text-sm leading-none">↺</span> : <ArchiveIcon />}
+                            </ActionButton>
+                            <ActionButton
+                                title="Delete session"
+                                tone="danger"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    void prepareDeleteSession(session);
+                                }}
+                            >
+                                <span className="text-sm leading-none">×</span>
+                            </ActionButton>
+                        </div>
+                    </div>
+
+                    {confirmDeleteSessionId === session.id && (
+                        <div className="mt-2 rounded-md border border-red-900/40 bg-red-950/20 px-2.5 py-2 space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="text-xs text-red-100/90 break-words">
+                                    {session.worktree_path ? `Delete ${session.name} and clean up its worktree?` : `Delete ${session.name}?`}
+                                </span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); void deleteSession(session.id); }}
+                                        disabled={deletingSession}
+                                        className="text-[10px] px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
+                                    >
+                                        {deletingSession ? '…' : 'Yes'}
+                                    </button>
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(null); }}
+                                        className="text-[10px] px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
+                                    >
+                                        No
+                                    </button>
+                                </div>
+                            </div>
+                            {loadingDeleteDetailsId === session.id && (
+                                <p className="text-[11px] text-red-200/80">Checking worktree status…</p>
+                            )}
+                            {loadingDeleteDetailsId !== session.id && dirtyCount > 0 && (
+                                <p className="text-[11px] text-amber-200/90">
+                                    This worktree has {dirtyCount} uncommitted change{dirtyCount === 1 ? '' : 's'}.
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {isActive && !isEditing && sessionRefs.length > 0 && (
+                    <div className="px-2 pb-1.5 flex flex-wrap gap-1">
+                        {sessionRefs.map((file) => (
+                            <span
+                                key={file.id}
+                                className="inline-flex items-center gap-0.5 text-[10px] bg-orange-900/60 text-orange-200/80 px-1.5 py-0.5 rounded font-medium"
+                                title={file.path}
+                            >
+                                {file.path.split(/[/\\]/).pop()}
+                            </span>
+                        ))}
+                    </div>
+                )}
+                {isActive && isEditing && (
+                    <div className="px-2 pb-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                            className="w-full bg-gray-950/80 border border-orange-500/30 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-500/30 transition-all"
+                            value={editingSessionName}
+                            onChange={(e) => setEditingSessionName(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && void saveSessionEdit()}
+                            placeholder="Session name"
+                        />
+                        <MdFilePicker
+                            files={mdFiles.filter((file) => file.type !== 'prompt')}
+                            selected={editingSessionRefs}
+                            onChange={setEditingSessionRefs}
+                            label="Context files"
+                        />
+                        <div className="flex gap-1.5">
+                            <button
+                                onClick={(e) => { e.stopPropagation(); void saveSessionEdit(); }}
+                                disabled={savingEdit}
+                                className="flex-1 text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {savingEdit ? 'Saving…' : 'Save'}
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); cancelEditingSession(); }}
+                                className="text-xs px-3 py-1.5 rounded-md border border-gray-700 bg-gray-800 text-gray-300 hover:text-white font-medium transition-all"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </li>
+        );
     };
 
     return (
@@ -555,182 +838,19 @@ export default function SessionList() {
             )}
 
             {!showNew && errorMsg && <p className="px-2 pb-2 text-xs text-red-400">{errorMsg}</p>}
-
             <ul className="space-y-0.5">
-                {[...sessions].sort((a, b) => a.sort_order - b.sort_order).map((session: Session) => {
-                    const isActive = selectedSession?.id === session.id;
-                    const isDiffActive =
-                        activeDiffTarget?.repoId === selectedRepo.id &&
-                        activeDiffTarget.sessionId === session.id;
-                    const isEditing = editingSessionId === session.id;
-                    const branchLabel = getSessionBranchLabel(session);
-                    const stateMeta = getSessionStateMeta(session.state);
-                    return (
-                        <li
-                            key={session.id}
-                            draggable
-                            onDragStart={() => handleDragStart(session.id)}
-                            onDragOver={(e) => handleDragOver(e, session.id)}
-                            onDrop={(e) => { void handleDrop(e, session.id); }}
-                            onDragEnd={handleDragEnd}
-                            onClick={() => setSelectedSession(isActive ? null : session)}
-                            className={`group rounded-lg border cursor-pointer text-sm transition-all ${dragOverId === session.id
-                                ? 'border-orange-400/60 bg-orange-600/10 scale-[0.98]'
-                                : isActive
-                                    ? 'border-orange-500/40 bg-orange-600/10 text-white shadow-[0_8px_24px_rgba(234,88,12,0.12)]'
-                                    : 'border-gray-800 bg-gray-900/40 text-gray-200 hover:border-gray-700 hover:bg-gray-900/70'
-                                }`}
-                        >
-                            <div className="px-2.5 py-2">
-                                <div className="flex items-start gap-2 min-w-0">
-                                    <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${stateMeta.dotClass} ${isActive ? 'ring-2 ring-black/45 ring-offset-1 ring-offset-orange-700/80' : ''}`} />
-                                    <span className={`flex-1 min-w-0 whitespace-normal break-words text-sm leading-5 font-medium ${isActive ? 'text-white' : 'text-gray-100'}`}>
-                                        {session.name}
-                                    </span>
-                                </div>
-
-                                <div className="mt-2 min-h-[1.5rem]">
-                                    <span className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${branchLabel
-                                        ? isActive
-                                            ? 'border-orange-400/40 bg-orange-500/10 text-orange-100'
-                                            : 'border-gray-700 bg-gray-800/90 text-gray-300'
-                                        : isActive
-                                            ? 'border-white/10 bg-black/20 text-gray-200'
-                                            : 'border-gray-800 bg-gray-900/60 text-gray-500'
-                                        }`}>
-                                        <span className="truncate">{branchLabel ?? 'No branch'}</span>
-                                    </span>
-                                </div>
-
-                                <div className="mt-2 flex items-start justify-between gap-2">
-                                    <span className={`text-xs leading-6 ${isActive ? 'text-orange-100' : 'text-gray-400'}`}>
-                                        {session.agent_type}
-                                    </span>
-                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
-                                        <ActionButton
-                                            title={selectedRepo.is_git_repo
-                                                ? isDiffActive
-                                                    ? 'Hide file diffs'
-                                                    : 'View file diffs'
-                                                : 'File diffs require a git repository'}
-                                            disabled={!selectedRepo.is_git_repo}
-                                            active={isDiffActive}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleDiffTarget(selectedRepo.id, session.id);
-                                            }}
-                                        >
-                                            <DiffIcon />
-                                        </ActionButton>
-                                        <ActionButton
-                                            title="Restart session"
-                                            disabled={restartingSessionId === session.id}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                void restartSession(session);
-                                            }}
-                                        >
-                                            <RefreshIcon spinning={restartingSessionId === session.id} />
-                                        </ActionButton>
-                                        <ActionButton
-                                            title="Update session"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (isEditing) {
-                                                    cancelEditingSession();
-                                                    return;
-                                                }
-                                                void startEditingSession(session);
-                                            }}
-                                        >
-                                            <EditIcon />
-                                        </ActionButton>
-                                        <ActionButton
-                                            title="Delete session"
-                                            tone="danger"
-                                            onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(session.id); }}
-                                        >
-                                            <span className="text-sm leading-none">×</span>
-                                        </ActionButton>
-                                    </div>
-                                </div>
-
-                                {confirmDeleteSessionId === session.id && (
-                                    <div className="mt-2 rounded-md border border-red-900/40 bg-red-950/20 px-2.5 py-2">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <span className="text-xs text-red-100/90 break-words">Delete {session.name}?</span>
-                                            <div className="flex items-center gap-1 shrink-0">
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); void deleteSession(session.id); }}
-                                                    disabled={deletingSession}
-                                                    className="text-[10px] px-2 py-1 rounded bg-red-700 hover:bg-red-600 text-white font-medium transition-all disabled:opacity-40"
-                                                >
-                                                    {deletingSession ? '…' : 'Yes'}
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(null); }}
-                                                    className="text-[10px] px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-all"
-                                                >
-                                                    No
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                            {isActive && !isEditing && sessionRefs.length > 0 && (
-                                <div className="px-2 pb-1.5 flex flex-wrap gap-1">
-                                    {sessionRefs.map((f) => (
-                                        <span
-                                            key={f.id}
-                                            className="inline-flex items-center gap-0.5 text-[10px] bg-orange-900/60 text-orange-200/80 px-1.5 py-0.5 rounded font-medium"
-                                            title={f.path}
-                                        >
-                                            {f.path.split(/[/\\]/).pop()}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-                            {isActive && isEditing && (
-                                <div className="px-2 pb-2 space-y-2" onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                        className="w-full bg-gray-950/80 border border-orange-500/30 text-sm px-2.5 py-1.5 rounded-md text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-500/30 transition-all"
-                                        value={editingSessionName}
-                                        onChange={(e) => setEditingSessionName(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && void saveSessionEdit()}
-                                        placeholder="Session name"
-                                    />
-                                    <MdFilePicker
-                                        files={mdFiles.filter((file) => file.type !== 'prompt')}
-                                        selected={editingSessionRefs}
-                                        onChange={setEditingSessionRefs}
-                                        label="Context files"
-                                    />
-                                    <div className="flex gap-1.5">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); void saveSessionEdit(); }}
-                                            disabled={savingEdit}
-                                            className="flex-1 text-xs bg-orange-600 hover:bg-orange-500 border border-orange-500 text-white py-1.5 rounded-md font-medium shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                                        >
-                                            {savingEdit ? 'Saving…' : 'Save'}
-                                        </button>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); cancelEditingSession(); }}
-                                            className="text-xs px-3 py-1.5 rounded-md border border-gray-700 bg-gray-800 text-gray-300 hover:text-white font-medium transition-all"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </li>
-                    );
-                })}
-                {sessions.length === 0 && (
+                {activeSessions.map(renderSessionRow)}
+                {activeSessions.length === 0 && archivedSessions.length === 0 && (
                     <li className="text-xs text-gray-600 px-2 py-2 italic">
                         No sessions — click + Add to start one
                     </li>
                 )}
+                {archivedSessions.length > 0 && (
+                    <li className="pt-2 pb-1 px-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        Archived
+                    </li>
+                )}
+                {archivedSessions.map(renderSessionRow)}
             </ul>
         </div>
     );

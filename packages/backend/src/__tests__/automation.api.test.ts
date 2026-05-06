@@ -84,6 +84,44 @@ describe('Automation API', () => {
     expect((await res.json()).enabled).toBe(1);
   });
 
+  it('POST /api/automation/:id/run — records a failed manual run when the session is not running', async () => {
+    const res = await req(getApp(), `/api/automation/${taskId}/run`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    const task = await res.json();
+    expect(task.last_run_status).toBe('failed');
+    expect(task.last_error).toMatch(/no running process/i);
+    expect(task.consecutive_failures).toBe(1);
+
+    const runsRes = await req(getApp(), `/api/automation/${taskId}/runs`);
+    expect(runsRes.status).toBe(200);
+    const runs = await runsRes.json() as Array<{ trigger: string; status: string; error_message: string | null }>;
+    expect(runs[0]).toMatchObject({ trigger: 'manual', status: 'failed' });
+    expect(runs[0]?.error_message).toMatch(/no running process/i);
+  });
+
+  it('POST /api/automation/:id/run — disables the task after repeated failures', async () => {
+    const resetRes = await req(getApp(), `/api/automation/${taskId}/resume`, { method: 'PUT' });
+    expect(resetRes.status).toBe(200);
+
+    await req(getApp(), `/api/automation/${taskId}/run`, { method: 'POST' });
+    await req(getApp(), `/api/automation/${taskId}/run`, { method: 'POST' });
+    const finalRes = await req(getApp(), `/api/automation/${taskId}/run`, { method: 'POST' });
+    expect(finalRes.status).toBe(200);
+    const task = await finalRes.json();
+    expect(task.enabled).toBe(0);
+    expect(task.consecutive_failures).toBe(3);
+    expect(task.last_error).toMatch(/disabled after repeated failures/i);
+  });
+
+  it('PUT /api/automation/:id/resume — resets consecutive failures after auto-disable', async () => {
+    const res = await req(getApp(), `/api/automation/${taskId}/resume`, { method: 'PUT' });
+    expect(res.status).toBe(200);
+    const task = await res.json();
+    expect(task.enabled).toBe(1);
+    expect(task.consecutive_failures).toBe(0);
+    expect(task.last_error).toBeNull();
+  });
+
   it('PUT /api/automation/:id/pause — 404 for unknown task', async () => {
     const res = await req(getApp(), '/api/automation/99999/pause', { method: 'PUT' });
     expect(res.status).toBe(404);

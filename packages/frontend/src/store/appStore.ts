@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Repo, Session, Agent, Credential, MdFile, AppSettings } from '../api/client';
+import type { Repo, Session, Agent, Credential, MdFile, AppSettings, BackendConnectionState, BackendReadiness } from '../api/client';
 
 export type ActiveView = 'terminal' | 'editor' | 'diff';
 
@@ -34,6 +34,8 @@ interface AppState {
   /** repoId → count of unread "agent idle" alerts for sessions in that repo */
   repoAlerts: Record<number, number>;
   isLocked: boolean;
+  backendReadiness: BackendReadiness | null;
+  backendConnectionState: BackendConnectionState;
 
   setRepos: (repos: Repo[]) => void;
   setSelectedRepo: (repo: Repo | null) => void;
@@ -56,6 +58,8 @@ interface AppState {
   dismissRepoAlert: (repoId: number) => void;
   lock: () => void;
   unlock: () => void;
+  setBackendReadiness: (readiness: BackendReadiness | null) => void;
+  setBackendConnectionState: (state: BackendConnectionState) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -74,6 +78,8 @@ export const useAppStore = create<AppState>((set) => ({
   notifications: [],
   repoAlerts: {},
   isLocked: false,
+  backendReadiness: null,
+  backendConnectionState: 'disconnected',
 
   setRepos: (repos) => set({ repos }),
   setSelectedRepo: (repo) =>
@@ -217,4 +223,6 @@ export const useAppStore = create<AppState>((set) => ({
 
   lock: () => set({ isLocked: true }),
   unlock: () => set({ isLocked: false }),
+  setBackendReadiness: (backendReadiness) => set({ backendReadiness }),
+  setBackendConnectionState: (backendConnectionState) => set({ backendConnectionState }),
 }));

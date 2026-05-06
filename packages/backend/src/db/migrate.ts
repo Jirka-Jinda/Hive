@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { existsSync, readFileSync } from 'node:fs';
-import { MD_FILE_INDEX_SCHEMA, SCHEMA } from './schema';
+import { MD_FILE_INDEX_SCHEMA, OBSERVABILITY_INDEX_SCHEMA, SCHEMA } from './schema';
 import { normalizeTerminalText } from '../utils/terminal-text';
 
 function normalizeLogSearchText(output: Buffer | string): string {
@@ -29,6 +29,9 @@ export function migrate(db: Database.Database): void {
   }
   if (!sessionCols.some((c) => c.name === 'sort_order')) {
     db.exec('ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!sessionCols.some((c) => c.name === 'archived_at')) {
+    db.exec('ALTER TABLE sessions ADD COLUMN archived_at TEXT');
   }
 
   // Add content column if it doesn't exist yet (existing DBs)
@@ -85,6 +88,23 @@ export function migrate(db: Database.Database): void {
 
   db.exec(MD_FILE_INDEX_SCHEMA);
 
+  const mdFileRevisionsTable = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='md_file_revisions'"
+  ).get()) as { name: string } | undefined;
+  if (!mdFileRevisionsTable) {
+    db.exec(`
+      CREATE TABLE md_file_revisions (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        md_file_id      INTEGER NOT NULL REFERENCES md_files(id) ON DELETE CASCADE,
+        revision_number INTEGER NOT NULL,
+        content         TEXT    NOT NULL,
+        author_source   TEXT,
+        created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (md_file_id, revision_number)
+      )
+    `);
+  }
+
   // Add automation_tasks table for existing DBs
   const taskTable = (db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='automation_tasks'"
@@ -99,12 +119,84 @@ export function migrate(db: Database.Database): void {
         cron        TEXT    NOT NULL,
         params      TEXT    NOT NULL DEFAULT '{}',
         enabled     INTEGER NOT NULL DEFAULT 1,
+        last_run_started_at  TEXT,
         last_run_at TEXT,
+        last_run_finished_at TEXT,
+        last_run_duration_ms INTEGER,
+        last_run_status      TEXT,
+        last_error           TEXT,
+        last_output_summary  TEXT,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
         next_run_at TEXT,
         created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
       )
     `);
   }
+
+  const automationCols = db.pragma('table_info(automation_tasks)') as { name: string }[];
+  if (!automationCols.some((c) => c.name === 'last_run_started_at')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_run_started_at TEXT');
+  }
+  if (!automationCols.some((c) => c.name === 'last_run_finished_at')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_run_finished_at TEXT');
+  }
+  if (!automationCols.some((c) => c.name === 'last_run_duration_ms')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_run_duration_ms INTEGER');
+  }
+  if (!automationCols.some((c) => c.name === 'last_run_status')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_run_status TEXT');
+  }
+  if (!automationCols.some((c) => c.name === 'last_error')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_error TEXT');
+  }
+  if (!automationCols.some((c) => c.name === 'last_output_summary')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN last_output_summary TEXT');
+  }
+  if (!automationCols.some((c) => c.name === 'consecutive_failures')) {
+    db.exec('ALTER TABLE automation_tasks ADD COLUMN consecutive_failures INTEGER NOT NULL DEFAULT 0');
+  }
+
+  const automationRunsTable = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='automation_task_runs'"
+  ).get()) as { name: string } | undefined;
+  if (!automationRunsTable) {
+    db.exec(`
+      CREATE TABLE automation_task_runs (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id        INTEGER NOT NULL REFERENCES automation_tasks(id) ON DELETE CASCADE,
+        trigger        TEXT    NOT NULL,
+        status         TEXT    NOT NULL,
+        started_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+        finished_at    TEXT,
+        duration_ms    INTEGER,
+        error_message  TEXT,
+        output_summary TEXT
+      )
+    `);
+  }
+
+  const changeEventsTable = (db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='change_events'"
+  ).get()) as { name: string } | undefined;
+  if (!changeEventsTable) {
+    db.exec(`
+      CREATE TABLE change_events (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_type         TEXT    NOT NULL,
+        scope              TEXT,
+        repo_id            INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+        session_id         INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+        md_file_id         INTEGER REFERENCES md_files(id) ON DELETE SET NULL,
+        automation_task_id INTEGER REFERENCES automation_tasks(id) ON DELETE SET NULL,
+        path               TEXT,
+        title              TEXT    NOT NULL,
+        summary            TEXT,
+        created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+  }
+
+  db.exec(OBSERVABILITY_INDEX_SCHEMA);
 
   // Create or rebuild the FTS5 index for session log search on existing DBs.
   // Older builds used a contentless FTS table, which does not preserve

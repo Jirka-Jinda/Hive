@@ -45,7 +45,7 @@ describe('RepoAgentMdWatcher', () => {
     const rootPath = join(testPaths.root, 'watcher-root');
     const workspace = {
       listAgentMdWatchRoots: vi.fn(() => [{ repoId: 42, path: rootPath }]),
-      rediscoverRepoMdFiles: vi.fn(),
+      rediscoverRepoMdFiles: vi.fn(() => ({ repoChanged: true, sessionChangedIds: [] })),
     };
     const notificationBus = {
       emitMdFilesChanged: vi.fn(),
@@ -78,7 +78,7 @@ describe('RepoAgentMdWatcher', () => {
     const rootPath = join(testPaths.root, 'watcher-root-agents');
     const workspace = {
       listAgentMdWatchRoots: vi.fn(() => [{ repoId: 42, path: rootPath }]),
-      rediscoverRepoMdFiles: vi.fn(),
+      rediscoverRepoMdFiles: vi.fn(() => ({ repoChanged: true, sessionChangedIds: [] })),
     };
     const notificationBus = {
       emitMdFilesChanged: vi.fn(),
@@ -95,5 +95,29 @@ describe('RepoAgentMdWatcher', () => {
 
     expect(workspace.rediscoverRepoMdFiles).toHaveBeenCalledWith(42);
     expect(notificationBus.emitMdFilesChanged).toHaveBeenCalledWith({ scope: 'repo', repoId: 42 });
+  });
+
+  it('emits session-scoped notifications when rediscovery reports session changes', () => {
+    vi.useFakeTimers();
+    const rootPath = join(testPaths.root, 'watcher-root-session');
+    const workspace = {
+      listAgentMdWatchRoots: vi.fn(() => [{ repoId: 42, path: rootPath }]),
+      rediscoverRepoMdFiles: vi.fn(() => ({ repoChanged: false, sessionChangedIds: [7, 8] })),
+    };
+    const notificationBus = {
+      emitMdFilesChanged: vi.fn(),
+    };
+
+    const watcher = new RepoAgentMdWatcher(workspace as any, notificationBus as any);
+    watcher.startWatching();
+    vi.advanceTimersByTime(100);
+    notificationBus.emitMdFilesChanged.mockClear();
+
+    chokidarMock.handlers.get('change')?.(join(rootPath, '.agent', 'created.md'));
+    vi.advanceTimersByTime(100);
+
+    expect(notificationBus.emitMdFilesChanged).toHaveBeenCalledTimes(2);
+    expect(notificationBus.emitMdFilesChanged).toHaveBeenNthCalledWith(1, { scope: 'session', repoId: 42, sessionId: 7 });
+    expect(notificationBus.emitMdFilesChanged).toHaveBeenNthCalledWith(2, { scope: 'session', repoId: 42, sessionId: 8 });
   });
 });

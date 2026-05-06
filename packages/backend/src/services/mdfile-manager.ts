@@ -21,6 +21,15 @@ export interface MdFile {
   updated_at: string;
 }
 
+export interface MdFileRevision {
+  id: number;
+  md_file_id: number;
+  revision_number: number;
+  content: string;
+  author_source: string | null;
+  created_at: string;
+}
+
 export interface MdFileUpdate {
   content?: string;
   scope?: MdFile['scope'];
@@ -398,5 +407,48 @@ export class MdFileManager {
     const result = this.db.prepare('DELETE FROM md_files WHERE id = ?').run(id);
     if (result.changes === 0) throw new Error(`MD file ${id} not found`);
     if (row.scope === 'central') this.sync?.deleteFromDisk(row.path);
+  }
+
+  recordRevision(id: number, content: string, authorSource: string | null = null): MdFileRevision {
+    this.getRow(id);
+    const row = this.db
+      .prepare('SELECT COALESCE(MAX(revision_number), 0) + 1 AS next_revision_number FROM md_file_revisions WHERE md_file_id = ?')
+      .get(id) as { next_revision_number: number };
+    const result = this.db
+      .prepare('INSERT INTO md_file_revisions (md_file_id, revision_number, content, author_source) VALUES (?, ?, ?, ?)')
+      .run(id, row.next_revision_number, content, authorSource);
+    return this.db
+      .prepare('SELECT * FROM md_file_revisions WHERE id = ?')
+      .get(result.lastInsertRowid as number) as MdFileRevision;
+  }
+
+  listRevisions(id: number): MdFileRevision[] {
+    this.getRow(id);
+    return this.db
+      .prepare('SELECT * FROM md_file_revisions WHERE md_file_id = ? ORDER BY revision_number DESC')
+      .all(id) as MdFileRevision[];
+  }
+
+  readRevision(id: number, revisionId: number): MdFileRevision {
+    this.getRow(id);
+    const row = this.db
+      .prepare('SELECT * FROM md_file_revisions WHERE md_file_id = ? AND id = ?')
+      .get(id, revisionId) as MdFileRevision | undefined;
+    if (!row) throw new Error(`MD file revision ${revisionId} not found for file ${id}`);
+    return row;
+  }
+
+  restoreRevision(id: number, revisionId: number): MdFile {
+    const revision = this.readRevision(id, revisionId);
+    const existing = this.getRow(id);
+    if (existing.content === revision.content) {
+      return existing;
+    }
+
+    this.update(id, { content: revision.content });
+    this.recordRevision(id, revision.content, 'restore');
+    return this.db
+      .prepare('SELECT id,scope,repo_id,session_id,path,type,created_at,updated_at FROM md_files WHERE id = ?')
+      .get(id) as MdFile;
   }
 }

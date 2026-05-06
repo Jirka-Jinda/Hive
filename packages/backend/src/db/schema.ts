@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   initial_branch_name TEXT,
   worktree_path TEXT,
   sort_order    INTEGER NOT NULL DEFAULT 0,
+  archived_at   TEXT,
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -96,6 +97,16 @@ CREATE TABLE IF NOT EXISTS md_files (
   updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS md_file_revisions (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  md_file_id      INTEGER NOT NULL REFERENCES md_files(id) ON DELETE CASCADE,
+  revision_number INTEGER NOT NULL,
+  content         TEXT    NOT NULL,
+  author_source   TEXT,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (md_file_id, revision_number)
+);
+
 -- Repo-level central MD file references (default context for all sessions in a repo)
 CREATE TABLE IF NOT EXISTS repo_md_refs (
   repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
@@ -119,9 +130,42 @@ CREATE TABLE IF NOT EXISTS automation_tasks (
   cron        TEXT    NOT NULL,
   params      TEXT    NOT NULL DEFAULT '{}',
   enabled     INTEGER NOT NULL DEFAULT 1,
+  last_run_started_at  TEXT,
   last_run_at TEXT,
+  last_run_finished_at TEXT,
+  last_run_duration_ms INTEGER,
+  last_run_status      TEXT,
+  last_error           TEXT,
+  last_output_summary  TEXT,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
   next_run_at TEXT,
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS automation_task_runs (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id        INTEGER NOT NULL REFERENCES automation_tasks(id) ON DELETE CASCADE,
+  trigger        TEXT    NOT NULL,
+  status         TEXT    NOT NULL,
+  started_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+  finished_at    TEXT,
+  duration_ms    INTEGER,
+  error_message  TEXT,
+  output_summary TEXT
+);
+
+CREATE TABLE IF NOT EXISTS change_events (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_type         TEXT    NOT NULL,
+  scope              TEXT,
+  repo_id            INTEGER REFERENCES repos(id) ON DELETE CASCADE,
+  session_id         INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+  md_file_id         INTEGER REFERENCES md_files(id) ON DELETE SET NULL,
+  automation_task_id INTEGER REFERENCES automation_tasks(id) ON DELETE SET NULL,
+  path               TEXT,
+  title              TEXT    NOT NULL,
+  summary            TEXT,
+  created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Application error log (errors / unhandled exceptions)
@@ -154,4 +198,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_repo_path
 CREATE UNIQUE INDEX IF NOT EXISTS idx_md_files_session_path
   ON md_files(session_id, path)
   WHERE scope = 'session' AND session_id IS NOT NULL;
+`;
+
+export const OBSERVABILITY_INDEX_SCHEMA = `
+CREATE INDEX IF NOT EXISTS idx_md_file_revisions_file_revision
+  ON md_file_revisions(md_file_id, revision_number DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_task_runs_task_started
+  ON automation_task_runs(task_id, started_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_change_events_created
+  ON change_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_change_events_repo_session
+  ON change_events(repo_id, session_id, created_at DESC);
 `;

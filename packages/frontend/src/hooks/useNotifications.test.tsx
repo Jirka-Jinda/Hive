@@ -146,6 +146,103 @@ describe('useNotifications', () => {
     expect(useAppStore.getState().selectedMdFile).toBeNull();
   });
 
+  it('refreshes only the selected session file list when a session md change arrives', async () => {
+    resetAppStore({
+      mdFiles: [
+        {
+          id: 10,
+          scope: 'central',
+          repo_id: null,
+          session_id: null,
+          path: 'existing.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+        {
+          id: 20,
+          scope: 'repo',
+          repo_id: 2,
+          session_id: null,
+          path: 'repo-note.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+        {
+          id: 30,
+          scope: 'session',
+          repo_id: 2,
+          session_id: 7,
+          path: 'draft.md',
+          type: 'other',
+          created_at: '2026-04-27T00:00:00Z',
+          updated_at: '2026-04-27T00:00:00Z',
+        },
+      ],
+      selectedRepo: { id: 2, name: 'my-repo', path: '/repos/my-repo', source: 'local', git_url: null, is_git_repo: false, created_at: '2026-04-27T00:00:00Z' },
+      selectedSession: {
+        id: 7,
+        repo_id: 2,
+        agent_type: 'codex',
+        credential_id: null,
+        name: 'Draft Session',
+        status: 'running',
+        state: 'idle',
+        worktree_path: '/worktrees/draft',
+        sort_order: 0,
+        created_at: '2026-04-27T00:00:00Z',
+        updated_at: '2026-04-27T00:00:00Z',
+      },
+    });
+
+    apiMock.mdfiles.list.mockResolvedValue([
+      {
+        id: 31,
+        scope: 'session',
+        repo_id: 2,
+        session_id: 7,
+        path: 'updated-draft.md',
+        type: 'instruction',
+        created_at: '2026-04-27T00:00:00Z',
+        updated_at: '2026-04-27T00:00:00Z',
+      },
+    ]);
+
+    render(<Harness />);
+
+    const ws = MockWebSocket.instances[0];
+    ws.emitMessage({ type: 'md-files-changed', scope: 'session', repoId: 2, sessionId: 7 });
+
+    await waitFor(() => {
+      expect(apiMock.mdfiles.list).toHaveBeenCalledWith('session', undefined, 7);
+    });
+
+    await waitFor(() => {
+      expect(useAppStore.getState().mdFiles).toEqual([
+        expect.objectContaining({ id: 10, scope: 'central' }),
+        expect.objectContaining({ id: 20, scope: 'repo' }),
+        expect.objectContaining({ id: 31, scope: 'session', session_id: 7, path: 'updated-draft.md' }),
+      ]);
+    });
+  });
+
+  it('tracks websocket connection state', async () => {
+    render(<Harness />);
+
+    const ws = MockWebSocket.instances[0];
+    expect(useAppStore.getState().backendConnectionState).toBe('disconnected');
+
+    ws.onopen?.({} as Event);
+    expect(useAppStore.getState().backendConnectionState).toBe('connected');
+
+    ws.onclose?.({} as CloseEvent);
+
+    await waitFor(() => {
+      expect(useAppStore.getState().backendConnectionState).toBe('reconnecting');
+    });
+  });
+
   it('refreshes repo file list when a repo md change arrives for the selected repo', async () => {
     resetAppStore({
       mdFiles: [

@@ -48,6 +48,9 @@ import { PipelineRegistry } from '../pipeline/pipeline-registry';
 import { createTokenUsageNode } from '../pipeline/nodes/token-usage.node';
 import { LogService } from '../services/log-service';
 import { CentralMdSyncService } from '../services/central-md-sync';
+import { NotificationBus } from '../services/notification-bus';
+import { ChangeFeedService } from '../services/change-feed-service';
+import { changesRouter } from '../routes/changes';
 
 export const testPaths = {
   root: TEST_DATA_DIR,
@@ -63,7 +66,9 @@ function makeTestApp() {
 
   const mdMgr = new MdFileManager(db);
   const settingsService = new SettingsService();
-  const centralMdSync = new CentralMdSyncService(mdMgr, settingsService);
+  const notificationBus = new NotificationBus();
+  const changeFeed = new ChangeFeedService(db);
+  const centralMdSync = new CentralMdSyncService(mdMgr, settingsService, notificationBus);
   const sessionStore = new SessionStore(db);
   const repoManager = new RepoManager(db, settingsService);
   const credentialStore = new CredentialStore(db);
@@ -76,7 +81,7 @@ function makeTestApp() {
   const logService = new LogService(db);
   const pipelineRegistry = new PipelineRegistry(settingsService);
   const tokenCounter = new TokenCounterService();
-  const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager);
+  const automationService = new AutomationService(db, mdMgr, sessionStore, repoManager, undefined, changeFeed);
 
   pipelineRegistry.register(createTokenUsageNode(sessionStore, usageService, tokenCounter));
 
@@ -85,12 +90,13 @@ function makeTestApp() {
   app.route('/api/repos', reposRouter(workspace, mdRefService));
   app.route('/api/credentials', credentialsRouter(credentialStore));
   app.route('/api/agents', agentsRouter());
-  app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService));
+  app.route('/api/mdfiles', mdfilesRouter(mdMgr, workspace, logService, notificationBus, changeFeed));
   app.route('/api/usage', usageRouter(usageService, repoManager));
   app.route('/api/settings', settingsRouter(settingsService, centralMdSync));
   app.route('/api/pipeline', pipelineRouter(pipelineRegistry));
   app.route('/api/tools', toolsRouter());
   app.route('/api/automation', automationRouter(automationService));
+  app.route('/api/changes', changesRouter(changeFeed));
   app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
   return app;
 }

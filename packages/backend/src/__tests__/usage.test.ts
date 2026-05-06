@@ -83,7 +83,7 @@ describe('Usage analytics', () => {
     rmSync(TEST_DATA_DIR, { recursive: true, force: true });
   });
 
-  it('ignores the initial agent intro output and counts later usage via the API', async () => {
+  it('ignores the initial agent intro output and counts later submitted usage via the API', async () => {
     const repo = await repoManager.addLocal(TEST_DATA_DIR, 'usage-repo');
     repoId = repo.id;
 
@@ -108,7 +108,8 @@ describe('Usage analytics', () => {
     await node.transform(startupText, { sessionId, repoId, phase: 'session-start' });
     await node.transform(introText, { sessionId, repoId, phase: 'agent-output' });
     await node.transform(inputText, { sessionId, repoId, phase: 'user-input' });
-    await node.transform(outputText, { sessionId, repoId, phase: 'agent-output' });
+    await node.transform('\r', { sessionId, repoId, phase: 'user-input' });
+    await node.transform(`${outputText}\nclaude> `, { sessionId, repoId, phase: 'agent-output' });
 
     const summary = usageService.getSummary(repoId);
 

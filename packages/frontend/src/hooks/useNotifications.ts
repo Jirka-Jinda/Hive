@@ -9,9 +9,11 @@ export function useNotifications(): void {
   const updateSessionState = useAppStore((s) => s.updateSessionState);
   const setMdFiles = useAppStore((s) => s.setMdFiles);
   const setSelectedMdFile = useAppStore((s) => s.setSelectedMdFile);
+  const setBackendConnectionState = useAppStore((s) => s.setBackendConnectionState);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelayRef = useRef(1_000);
   const wsRef = useRef<WebSocket | null>(null);
+  const hasConnectedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -22,10 +24,6 @@ export function useNotifications(): void {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        retryDelayRef.current = 1_000;
-      };
-
       ws.onmessage = (evt) => {
         try {
           const msg = JSON.parse(evt.data as string) as {
@@ -33,8 +31,9 @@ export function useNotifications(): void {
             sessionId: number;
             sessionName?: string;
             state: 'working' | 'idle' | 'stopped';
-            scope?: 'central' | 'repo';
+            scope?: 'central' | 'repo' | 'session';
             repoId?: number;
+            sessionIdChanged?: number;
           };
           if (msg.type === 'session-state') {
             updateSessionState(msg.sessionId, msg.state, msg.sessionName ?? '', msg.repoId);
@@ -60,16 +59,14 @@ export function useNotifications(): void {
 
           if (msg.type === 'md-files-changed' && msg.scope === 'repo' && msg.repoId !== undefined) {
             const repoId = msg.repoId;
-            const { selectedRepo, selectedSession } = useAppStore.getState();
-            const sessionFilesPromise = selectedSession?.repo_id === repoId && selectedSession.worktree_path
-              ? api.mdfiles.list('session', undefined, selectedSession.id)
-              : Promise.resolve([]);
+            const { selectedRepo } = useAppStore.getState();
 
-            void Promise.all([api.mdfiles.list('repo', repoId), sessionFilesPromise]).then(([freshRepoFiles, sessionFiles]) => {
+            void api.mdfiles.list('repo', repoId).then((freshRepoFiles) => {
               const { mdFiles, selectedMdFile, selectedRepo: currentRepo } = useAppStore.getState();
               if (selectedRepo?.id !== repoId) return;
               if (currentRepo?.id !== repoId) return;
               const centralFiles = mdFiles.filter((file) => file.scope === 'central');
+              const sessionFiles = mdFiles.filter((file) => file.scope === 'session');
               setMdFiles([...centralFiles, ...freshRepoFiles, ...sessionFiles]);
 
               if (
@@ -78,6 +75,25 @@ export function useNotifications(): void {
               ) {
                 setSelectedMdFile(null);
               }
+            }).catch(() => {
+              // Ignore transient refresh failures.
+            });
+          }
+
+          if (
+            msg.type === 'md-files-changed' &&
+            msg.scope === 'session' &&
+            msg.sessionId !== undefined
+          ) {
+            const { selectedSession } = useAppStore.getState();
+            if (selectedSession?.id !== msg.sessionId) return;
+
+            void api.mdfiles.list('session', undefined, msg.sessionId).then((sessionFiles) => {
+              const { mdFiles, selectedMdFile, selectedSession: currentSession } = useAppStore.getState();
+              if (currentSession?.id !== msg.sessionId) return;
+              const centralFiles = mdFiles.filter((file) => file.scope === 'central');
+              const repoFiles = mdFiles.filter((file) => file.scope === 'repo');
+              setMdFiles([...centralFiles, ...repoFiles, ...sessionFiles]);
 
               if (
                 selectedMdFile?.scope === 'session' &&
@@ -96,6 +112,7 @@ export function useNotifications(): void {
 
       ws.onclose = () => {
         wsRef.current = null;
+        setBackendConnectionState(hasConnectedRef.current ? 'reconnecting' : 'backend-unavailable');
         if (!cancelled) {
           retryRef.current = setTimeout(() => {
             retryDelayRef.current = Math.min(retryDelayRef.current * 2, MAX_RETRY_DELAY_MS);
@@ -105,7 +122,16 @@ export function useNotifications(): void {
       };
 
       ws.onerror = () => {
+        if (!hasConnectedRef.current) {
+          setBackendConnectionState('backend-unavailable');
+        }
         ws.close();
+      };
+
+      ws.onopen = () => {
+        hasConnectedRef.current = true;
+        retryDelayRef.current = 1_000;
+        setBackendConnectionState('connected');
       };
     }
 
@@ -118,6 +144,7 @@ export function useNotifications(): void {
         wsRef.current.onclose = null;
         wsRef.current.close();
       }
+      setBackendConnectionState('disconnected');
     };
-  }, [setMdFiles, setSelectedMdFile, updateSessionState]);
+  }, [setBackendConnectionState, setMdFiles, setSelectedMdFile, updateSessionState]);
 }

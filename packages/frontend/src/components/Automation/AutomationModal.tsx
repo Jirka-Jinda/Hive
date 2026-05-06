@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client';
 import { useAppStore } from '../../store/appStore';
-import type { AutomationTask, MdFile, Repo, Session } from '../../api/client';
+import type { AutomationTask, AutomationTaskRun, MdFile, Repo, Session } from '../../api/client';
 import XCloseButton from '../ui/XCloseButton';
 
 interface Props {
@@ -36,6 +36,7 @@ export default function AutomationModal({ onClose }: Props) {
     const [newMdFileId, setNewMdFileId] = useState<number | ''>('');
     const [newSessionId, setNewSessionId] = useState<number | ''>('');
     const [newCron, setNewCron] = useState('*/15 * * * *');
+    const [newCronPreset, setNewCronPreset] = useState('');
     const [newTextParams, setNewTextParams] = useState<Record<string, string>>({});
     const [templateParams, setTemplateParams] = useState<{ name: string; default?: string; description?: string }[]>([]);
     const [creating, setCreating] = useState(false);
@@ -44,6 +45,10 @@ export default function AutomationModal({ onClose }: Props) {
     // Delete confirm
     const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
     const [deletingId, setDeletingId] = useState<number | null>(null);
+    const [runningNowId, setRunningNowId] = useState<number | null>(null);
+    const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
+    const [loadingRunsById, setLoadingRunsById] = useState<Record<number, boolean>>({});
+    const [taskRunsById, setTaskRunsById] = useState<Record<number, AutomationTaskRun[]>>({});
 
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -109,6 +114,7 @@ export default function AutomationModal({ onClose }: Props) {
             setNewMdFileId('');
             setNewSessionId('');
             setNewCron('*/15 * * * *');
+            setNewCronPreset('');
             setNewTextParams({});
         } catch (e: unknown) {
             setCreateError(e instanceof Error ? e.message : 'Failed to create task');
@@ -122,6 +128,32 @@ export default function AutomationModal({ onClose }: Props) {
             const updated = await (task.enabled ? api.automation.pause(task.id) : api.automation.resume(task.id));
             setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
         } catch { /* ignore */ }
+    };
+
+    const loadTaskRuns = async (taskId: number) => {
+        setLoadingRunsById((prev) => ({ ...prev, [taskId]: true }));
+        try {
+            const runs = await api.automation.runs(taskId, 5);
+            setTaskRunsById((prev) => ({ ...prev, [taskId]: runs }));
+        } catch {
+            setTaskRunsById((prev) => ({ ...prev, [taskId]: [] }));
+        } finally {
+            setLoadingRunsById((prev) => ({ ...prev, [taskId]: false }));
+        }
+    };
+
+    const handleRunNow = async (taskId: number) => {
+        setRunningNowId(taskId);
+        try {
+            const updated = await api.automation.run(taskId);
+            setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)));
+            setExpandedTaskId(taskId);
+            await loadTaskRuns(taskId);
+        } catch {
+            // best effort; the card already shows previous state
+        } finally {
+            setRunningNowId(null);
+        }
     };
 
     const handleDelete = async (id: number) => {
@@ -145,6 +177,12 @@ export default function AutomationModal({ onClose }: Props) {
     const fmtDate = (s: string | null) => {
         if (!s) return '—';
         return new Date(s).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+    };
+
+    const fmtDuration = (durationMs: number | null) => {
+        if (durationMs == null) return '—';
+        if (durationMs < 1000) return `${durationMs} ms`;
+        return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 1)} s`;
     };
 
     return (
@@ -221,8 +259,11 @@ export default function AutomationModal({ onClose }: Props) {
                                     <label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Schedule (cron)</label>
                                     <select
                                         className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded text-gray-400 focus:outline-none focus:border-orange-500 transition-all"
-                                        value=""
-                                        onChange={(e) => { if (e.target.value) setNewCron(e.target.value); }}
+                                        value={newCronPreset}
+                                        onChange={(e) => {
+                                            setNewCronPreset(e.target.value);
+                                            if (e.target.value) setNewCron(e.target.value);
+                                        }}
                                     >
                                         <option value="">— preset —</option>
                                         {CRON_PRESETS.map((p) => (
@@ -233,7 +274,12 @@ export default function AutomationModal({ onClose }: Props) {
                                         className="w-full bg-gray-900 border border-gray-700 text-xs px-2 py-1.5 rounded font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:border-orange-500 transition-all"
                                         placeholder="*/15 * * * *"
                                         value={newCron}
-                                        onChange={(e) => setNewCron(e.target.value)}
+                                        onChange={(e) => {
+                                            setNewCron(e.target.value);
+                                            if (e.target.value !== newCronPreset) {
+                                                setNewCronPreset('');
+                                            }
+                                        }}
                                     />
                                     <p className="text-[10px] text-gray-600">min hr dom mon dow — <span className="text-gray-500">repo &amp; session filled automatically</span></p>
                                 </div>
@@ -287,6 +333,24 @@ export default function AutomationModal({ onClose }: Props) {
                                 {tasks.map((task) => {
                                     const isPendingDelete = confirmDeleteId === task.id;
                                     const isEnabled = task.enabled === 1;
+                                    const isExpanded = expandedTaskId === task.id;
+                                    const recentRuns = taskRunsById[task.id] ?? [];
+                                    const statusBadgeClassName = task.last_run_status === 'failed'
+                                        ? 'bg-red-950/50 text-red-300'
+                                        : task.last_run_status === 'running'
+                                            ? 'bg-amber-950/50 text-amber-300'
+                                            : 'bg-emerald-950/50 text-emerald-300';
+                                    const statusLabel = task.last_run_status === 'failed'
+                                        ? isEnabled
+                                            ? 'failing'
+                                            : 'disabled'
+                                        : task.last_run_status === 'running'
+                                            ? 'running'
+                                            : task.last_run_status === 'success'
+                                                ? 'healthy'
+                                                : isEnabled
+                                                    ? 'active'
+                                                    : 'paused';
                                     return (
                                         <div
                                             key={task.id}
@@ -325,6 +389,9 @@ export default function AutomationModal({ onClose }: Props) {
                                                                     }`}>
                                                                     {isEnabled ? 'active' : 'paused'}
                                                                 </span>
+                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${statusBadgeClassName}`}>
+                                                                    {statusLabel}
+                                                                </span>
                                                             </div>
                                                             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5">
                                                                 <span className="text-[11px] text-gray-500">
@@ -339,18 +406,60 @@ export default function AutomationModal({ onClose }: Props) {
                                                                 <span className="text-[11px] text-gray-600">
                                                                     last: {fmtDate(task.last_run_at)}
                                                                 </span>
+                                                                <span className="text-[11px] text-gray-600">
+                                                                    duration: {fmtDuration(task.last_run_duration_ms)}
+                                                                </span>
                                                                 <span className="text-[11px] text-gray-600 col-span-2">
                                                                     next: {fmtDate(task.next_run_at)}
                                                                 </span>
                                                             </div>
+                                                            {task.last_error && (
+                                                                <p className="mt-2 text-[11px] text-red-300/90 break-words">
+                                                                    {task.last_error}
+                                                                </p>
+                                                            )}
+                                                            {task.last_output_summary && (
+                                                                <p className="mt-1 text-[11px] text-gray-400 break-words">
+                                                                    {task.last_output_summary}
+                                                                </p>
+                                                            )}
+                                                            {task.consecutive_failures > 0 && (
+                                                                <p className="mt-1 text-[11px] text-amber-300/90">
+                                                                    Consecutive failures: {task.consecutive_failures}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                         <div className="flex gap-1 shrink-0">
+                                                            <button
+                                                                onClick={() => void handleRunNow(task.id)}
+                                                                title="Run now"
+                                                                disabled={runningNowId === task.id}
+                                                                className="text-[11px] px-2 py-1 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-emerald-300 hover:border-emerald-500/50 font-medium transition-all disabled:opacity-40"
+                                                            >
+                                                                {runningNowId === task.id ? '…' : '▶'}
+                                                            </button>
                                                             <button
                                                                 onClick={() => void handlePause(task)}
                                                                 title={isEnabled ? 'Pause' : 'Resume'}
                                                                 className="text-[11px] px-2 py-1 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
                                                             >
                                                                 {isEnabled ? '⏸' : '▶'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (isExpanded) {
+                                                                        setExpandedTaskId(null);
+                                                                        return;
+                                                                    }
+                                                                    setExpandedTaskId(task.id);
+                                                                    if (!taskRunsById[task.id]) {
+                                                                        void loadTaskRuns(task.id);
+                                                                    }
+                                                                }}
+                                                                title={isExpanded ? 'Hide recent runs' : 'Show recent runs'}
+                                                                className="text-[11px] px-2 py-1 rounded border border-gray-700 bg-gray-800 text-gray-400 hover:text-gray-200 hover:border-gray-600 font-medium transition-all"
+                                                            >
+                                                                ≡
                                                             </button>
                                                             <button
                                                                 onClick={() => setConfirmDeleteId(task.id)}
@@ -361,6 +470,40 @@ export default function AutomationModal({ onClose }: Props) {
                                                             </button>
                                                         </div>
                                                     </div>
+                                                    {isExpanded && (
+                                                        <div className="mt-3 rounded-md border border-gray-800 bg-gray-950/60 overflow-hidden">
+                                                            <div className="px-3 py-2 border-b border-gray-800 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                                                                Recent Runs
+                                                            </div>
+                                                            {loadingRunsById[task.id] ? (
+                                                                <p className="px-3 py-2 text-xs text-gray-500">Loading recent runs…</p>
+                                                            ) : recentRuns.length === 0 ? (
+                                                                <p className="px-3 py-2 text-xs text-gray-500">No runs recorded yet.</p>
+                                                            ) : (
+                                                                <ul className="divide-y divide-gray-800/80">
+                                                                    {recentRuns.map((run) => (
+                                                                        <li key={run.id} className="px-3 py-2 text-xs text-gray-300">
+                                                                            <div className="flex items-center justify-between gap-2">
+                                                                                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${run.status === 'failed' ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/50 text-emerald-300'}`}>
+                                                                                    {run.status}
+                                                                                </span>
+                                                                                <span className="text-[11px] text-gray-500">{fmtDate(run.started_at)}</span>
+                                                                            </div>
+                                                                            <div className="mt-1 text-[11px] text-gray-500">
+                                                                                {run.trigger} · {fmtDuration(run.duration_ms)}
+                                                                            </div>
+                                                                            {run.error_message && (
+                                                                                <p className="mt-1 text-[11px] text-red-300/90 break-words">{run.error_message}</p>
+                                                                            )}
+                                                                            {run.output_summary && (
+                                                                                <p className="mt-1 text-[11px] text-gray-400 break-words">{run.output_summary}</p>
+                                                                            )}
+                                                                        </li>
+                                                                    ))}
+                                                                </ul>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </>
                                             )}
                                         </div>

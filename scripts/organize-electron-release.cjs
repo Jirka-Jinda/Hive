@@ -4,6 +4,7 @@ const path = require('node:path');
 const rootDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(rootDir, 'install', 'release');
 const readmePath = path.join(rootDir, 'README.md');
+const userGuidePath = path.join(rootDir, 'docs', 'user-guide.md');
 const executableDir = path.join(releaseDir, 'executable');
 const installationDir = path.join(releaseDir, 'installation');
 
@@ -48,3 +49,8 @@ for (const entry of fs.readdirSync(releaseDir, { withFileTypes: true })) {
 
 fs.copyFileSync(readmePath, path.join(executableDir, 'README.md'));
 fs.copyFileSync(readmePath, path.join(installationDir, 'README.md'));
+
+if (fs.existsSync(userGuidePath)) {
+  fs.copyFileSync(userGuidePath, path.join(executableDir, 'USER_GUIDE.md'));
+  fs.copyFileSync(userGuidePath, path.join(installationDir, 'USER_GUIDE.md'));
+}

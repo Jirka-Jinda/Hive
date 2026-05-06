@@ -15,6 +15,7 @@ export interface Session {
   initial_branch_name: string | null;
   worktree_path: string | null;
   sort_order: number;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,15 +34,19 @@ export interface SessionLogChunk {
 export class SessionStore {
   constructor(private db: Database.Database) {}
 
-  listAll(): Session[] {
+  listAll(includeArchived = true): Session[] {
     return this.db
-      .prepare('SELECT * FROM sessions ORDER BY created_at DESC')
+      .prepare(includeArchived
+        ? 'SELECT * FROM sessions ORDER BY created_at DESC'
+        : 'SELECT * FROM sessions WHERE archived_at IS NULL ORDER BY created_at DESC')
       .all() as Session[];
   }
 
-  list(repoId: number): Session[] {
+  list(repoId: number, includeArchived = true): Session[] {
     return this.db
-      .prepare('SELECT * FROM sessions WHERE repo_id = ? ORDER BY sort_order ASC, created_at DESC')
+      .prepare(includeArchived
+        ? 'SELECT * FROM sessions WHERE repo_id = ? ORDER BY (archived_at IS NOT NULL), sort_order ASC, created_at DESC'
+        : 'SELECT * FROM sessions WHERE repo_id = ? AND archived_at IS NULL ORDER BY sort_order ASC, created_at DESC')
       .all(repoId) as Session[];
   }
 
@@ -101,6 +106,20 @@ export class SessionStore {
       .prepare("UPDATE sessions SET name = ?, updated_at = datetime('now') WHERE id = ?")
       .run(nextName, id);
 
+    return this.get(id);
+  }
+
+  archive(id: number): Session {
+    this.db
+      .prepare("UPDATE sessions SET archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?")
+      .run(id);
+    return this.get(id);
+  }
+
+  unarchive(id: number): Session {
+    this.db
+      .prepare("UPDATE sessions SET archived_at = NULL, updated_at = datetime('now') WHERE id = ?")
+      .run(id);
     return this.get(id);
   }
 

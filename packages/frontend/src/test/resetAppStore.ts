@@ -17,6 +17,8 @@ export function resetAppStore(partial: Partial<ReturnType<typeof useAppStore.get
     notifications: [],
     repoAlerts: {},
     isLocked: false,
+    backendReadiness: null,
+    backendConnectionState: 'disconnected',
     ...partial,
   });
 }

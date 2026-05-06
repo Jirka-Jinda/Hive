@@ -135,8 +135,13 @@ export class RepoAgentMdWatcher {
     const timer = setTimeout(() => {
       this.syncTimers.delete(repoId);
       try {
-        this.workspace.rediscoverRepoMdFiles(repoId);
-        this.notificationBus?.emitMdFilesChanged({ scope: 'repo', repoId });
+        const summary = this.workspace.rediscoverRepoMdFiles(repoId);
+        if (summary.repoChanged) {
+          this.notificationBus?.emitMdFilesChanged({ scope: 'repo', repoId });
+        }
+        for (const sessionId of summary.sessionChangedIds) {
+          this.notificationBus?.emitMdFilesChanged({ scope: 'session', repoId, sessionId });
+        }
       } catch (error) {
         console.warn('[RepoAgentMdWatcher] repo md sync failed:', { repoId, error });
       }

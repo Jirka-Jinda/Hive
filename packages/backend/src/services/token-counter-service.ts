@@ -3,7 +3,11 @@ import { normalizeTerminalText } from '../utils/terminal-text';
 const FALLBACK_CHARS_PER_TOKEN = 4;
 
 function normalizeText(text: string): string {
-  return normalizeTerminalText(text);
+  return normalizeTerminalText(text)
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
 }
 
 export class TokenCounterService {
@@ -24,7 +28,13 @@ export class TokenCounterService {
   private getEncoder(): Promise<{ encode: (text: string) => number[] } | null> {
     if (!this.encoderPromise) {
       this.encoderPromise = import('js-tiktoken')
-        .then(({ getEncoding }) => getEncoding('cl100k_base'))
+        .then(({ getEncoding }) => {
+          try {
+            return getEncoding('o200k_base');
+          } catch {
+            return getEncoding('cl100k_base');
+          }
+        })
         .catch(() => null);
     }
 

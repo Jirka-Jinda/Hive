@@ -45,6 +45,11 @@ export interface SessionAgentFile {
   repoRelativePath: string;
 }
 
+export interface MdRediscoverySummary {
+  repoChanged: boolean;
+  sessionChangedIds: number[];
+}
+
 interface RepoMdFileSnapshot {
   path: string;
   content: string;
@@ -142,8 +147,9 @@ export class WorkspaceService {
    * worktrees. Repo-scoped files stay repo-scoped; unknown worktree-local
    * files are captured as session-scoped drafts for the owning session.
    */
-  rediscoverRepoMdFiles(repoId: number): void {
+  rediscoverRepoMdFiles(repoId: number): MdRediscoverySummary {
     const repo = this.repoManager.get(repoId);
+    const repoBefore = this.snapshotScopeDigest('repo', repoId);
 
     const discovered = discoverRepoMdFiles(repo.path);
     const isAgentFile = (path: string) => path.toLowerCase().startsWith(`${AGENT_MD_DIR}/`) || path.toLowerCase().startsWith('.agents/');
@@ -158,12 +164,15 @@ export class WorkspaceService {
 
     const repoAgentPaths = new Set(readAgentMarkdownFiles(repo.path).map((file) => file.repoRelativePath));
     this.mdFileManager.pruneMissingRepoAgentFiles(repoId, repoAgentPaths);
-    this.rediscoverSessionMdFiles(repoId);
+    const sessionChangedIds = this.rediscoverSessionMdFiles(repoId);
+    const repoChanged = repoBefore !== this.snapshotScopeDigest('repo', repoId);
 
     // Propagate changes downstream to all session worktrees.
     void this.syncRepoFilesToAllWorktrees(repoId).catch((error) => {
       console.warn('[WorkspaceService] Failed to sync repo files after rediscovery', { repoId, error });
     });
+
+    return { repoChanged, sessionChangedIds };
   }
 
   deleteRepo(id: number, deleteFromDisk = false): Promise<void> {
@@ -210,9 +219,9 @@ export class WorkspaceService {
     }
   }
 
-  async listSessions(repoId: number): Promise<SessionWithGitStatus[]> {
+  async listSessions(repoId: number, includeArchived = false): Promise<SessionWithGitStatus[]> {
     const repo = this.repoManager.get(repoId);
-    const sessions = this.sessionStore.list(repoId);
+    const sessions = this.sessionStore.list(repoId, includeArchived);
     return Promise.all(sessions.map((session) => this.toSessionView(session, repo)));
   }
 
@@ -275,6 +284,24 @@ export class WorkspaceService {
     }
 
     return this.toSessionView(this.sessionStore.update(sessionId, { name: input.name }), repo);
+  }
+
+  async archiveSession(repoId: number, sessionId: number): Promise<SessionWithGitStatus> {
+    const repo = this.repoManager.get(repoId);
+    const session = this.sessionStore.get(sessionId);
+    if (session.repo_id !== repoId) {
+      throw new Error(`Session ${sessionId} does not belong to repo ${repoId}`);
+    }
+    return this.toSessionView(this.sessionStore.archive(sessionId), repo);
+  }
+
+  async unarchiveSession(repoId: number, sessionId: number): Promise<SessionWithGitStatus> {
+    const repo = this.repoManager.get(repoId);
+    const session = this.sessionStore.get(sessionId);
+    if (session.repo_id !== repoId) {
+      throw new Error(`Session ${sessionId} does not belong to repo ${repoId}`);
+    }
+    return this.toSessionView(this.sessionStore.unarchive(sessionId), repo);
   }
 
   restartSession(repoId: number, sessionId: number): Promise<SessionWithGitStatus> {
@@ -754,7 +781,22 @@ export class WorkspaceService {
     }));
   }
 
-  private rediscoverSessionMdFiles(repoId: number): void {
+  private snapshotScopeDigest(scope: 'repo', ownerId: number): string;
+  private snapshotScopeDigest(scope: 'session', ownerId: number): string;
+  private snapshotScopeDigest(scope: 'repo' | 'session', ownerId: number): string {
+    const files = scope === 'repo'
+      ? this.mdFileManager.list('repo', ownerId)
+      : this.mdFileManager.list('session', undefined, ownerId);
+
+    return files
+      .map((file) => {
+        const { content } = this.mdFileManager.read(file.id);
+        return `${file.id}|${file.scope}|${file.repo_id ?? ''}|${file.session_id ?? ''}|${file.path}|${file.type}|${content}`;
+      })
+      .join('\u0000');
+  }
+
+  private rediscoverSessionMdFiles(repoId: number): number[] {
     const repoFilesByAgentPath = new Map<string, MdFile>();
     for (const file of this.mdFileManager.list('repo', repoId)) {
       try {
@@ -764,8 +806,12 @@ export class WorkspaceService {
       }
     }
 
+    const changedSessionIds: number[] = [];
+
     for (const session of this.sessionStore.list(repoId)) {
       if (!session.worktree_path) continue;
+
+      const before = this.snapshotScopeDigest('session', session.id);
 
       const worktreeFiles = readAgentMarkdownFiles(session.worktree_path);
       const sessionFiles: Array<{ path: string; content: string; type: MdFile['type'] }> = [];
@@ -794,7 +840,13 @@ export class WorkspaceService {
         this.mdFileManager.importDiscoveredSessionFiles(session.id, sessionFiles);
       }
       this.mdFileManager.pruneMissingSessionFiles(session.id, new Set(sessionFiles.map((file) => file.path)));
+
+      if (before !== this.snapshotScopeDigest('session', session.id)) {
+        changedSessionIds.push(session.id);
+      }
     }
+
+    return changedSessionIds;
   }
 
   private getSessionForRepo(repoId: number, sessionId: number): Session {

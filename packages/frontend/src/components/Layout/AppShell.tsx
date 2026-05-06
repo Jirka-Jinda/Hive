@@ -1,30 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { useAppStore, type ActiveView } from '../../store/appStore';
-import { api } from '../../api/client';
+import { api, type ChangeEvent } from '../../api/client';
 import RepoList from '../Sidebar/RepoList';
 import SessionList from '../Sidebar/SessionList';
 import TerminalView from '../Terminal/TerminalView';
 import ShellTerminal from '../Terminal/ShellTerminal';
 import MdEditor from '../Editor/MdEditor';
 import MdFilePanel from '../Editor/MdFilePanel';
-import CredentialsModal from './CredentialsModal';
-import SettingsModal from './SettingsModal';
-import PipelineModal from './PipelineModal';
-import UsageModal from './UsageModal';
-import InstallToolsModal from './InstallToolsModal';
-import GitHistoryModal from './GitHistoryModal';
 import GitDiffView from './GitDiffModal';
-import LogsModal from './LogsModal';
-import LogSearchModal from './LogSearchModal';
 import PromptPanel from '../Prompt/PromptPanel';
-import AutomationModal from '../Automation/AutomationModal';
 import { ToastContainer } from './ToastContainer';
 import { useNotifications } from '../../hooks/useNotifications';
 import { useDragResize } from '../../hooks/useDragResize';
 import { useTokenUsage } from '../../hooks/useTokenUsage';
 
+const CredentialsModal = lazy(() => import('./CredentialsModal'));
+const SettingsModal = lazy(() => import('./SettingsModal'));
+const PipelineModal = lazy(() => import('./PipelineModal'));
+const UsageModal = lazy(() => import('./UsageModal'));
+const InstallToolsModal = lazy(() => import('./InstallToolsModal'));
+const GitHistoryModal = lazy(() => import('./GitHistoryModal'));
+const LogsModal = lazy(() => import('./LogsModal'));
+const LogSearchModal = lazy(() => import('./LogSearchModal'));
+const AutomationModal = lazy(() => import('../Automation/AutomationModal'));
+const ChangesModal = lazy(() => import('./ChangesModal'));
+
 export default function AppShell() {
-    const { repos, selectedRepo, setRepos, setAgents, setCredentials, setMdFiles, setSelectedMdFile, setSettings, activeView, setActiveView, activeDiffTarget, setActiveDiffTarget, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSelectedSession, settings, lock } = useAppStore();
+    const { repos, selectedRepo, setRepos, setSelectedRepo, setAgents, setCredentials, setMdFiles, setSelectedMdFile, setSettings, activeView, setActiveView, activeDiffTarget, setActiveDiffTarget, selectedSession, selectedMdFile, sessions, sessionTerminalVersions, setSessions, setSelectedSession, settings, lock, backendReadiness, backendConnectionState, setBackendReadiness, setBackendConnectionState } = useAppStore();
 
     useNotifications();
 
@@ -35,6 +37,7 @@ export default function AppShell() {
     const [toolsAnyMissing, setToolsAnyMissing] = useState(false);
     const [showPrompts, setShowPrompts] = useState(false);
     const [showAutomation, setShowAutomation] = useState(false);
+    const [showChanges, setShowChanges] = useState(false);
     const [showUsage, setShowUsage] = useState(false);
     const [showGitHistory, setShowGitHistory] = useState(false);
     const [showLogs, setShowLogs] = useState(false);
@@ -101,6 +104,55 @@ export default function AppShell() {
         }
     }, [openInVsCodeTargetPath]);
 
+    const openChangeEvent = useCallback(async (event: ChangeEvent) => {
+        if (event.event_type.startsWith('automation')) {
+            setShowChanges(false);
+            setShowAutomation(true);
+            return;
+        }
+
+        if (event.repo_id !== null) {
+            const targetRepo = repos.find((repo) => repo.id === event.repo_id) ?? null;
+            if (targetRepo) {
+                setSelectedRepo(targetRepo);
+
+                const [centralFiles, repoFiles, repoSessions] = await Promise.all([
+                    api.mdfiles.list('central'),
+                    api.mdfiles.list('repo', targetRepo.id),
+                    api.repos.sessions.list(targetRepo.id, { includeArchived: true }),
+                ]);
+
+                let nextFiles = [...centralFiles, ...repoFiles];
+                setSessions(repoSessions);
+
+                if (event.session_id !== null) {
+                    const targetSession = repoSessions.find((session) => session.id === event.session_id) ?? null;
+                    setSelectedSession(targetSession);
+                    if (targetSession) {
+                        const sessionFiles = await api.mdfiles.list('session', undefined, targetSession.id);
+                        nextFiles = [...nextFiles, ...sessionFiles];
+                    }
+                } else {
+                    setSelectedSession(null);
+                }
+
+                setMdFiles(nextFiles);
+            }
+        }
+
+        if (event.md_file_id !== null) {
+            try {
+                const file = await api.mdfiles.get(event.md_file_id);
+                setSelectedMdFile(file);
+            } catch {
+                setSelectedMdFile(null);
+                throw new Error('This markdown file no longer exists.');
+            }
+        }
+
+        setShowChanges(false);
+    }, [repos, setMdFiles, setSelectedMdFile, setSelectedRepo, setSelectedSession, setSessions]);
+
     const cycleMainView = useCallback(() => {
         const views: ActiveView[] = ['terminal'];
         if (selectedMdFile) views.push('editor');
@@ -115,17 +167,116 @@ export default function AppShell() {
         return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: value >= 1000 ? 1 : 0 }).format(value);
     }, []);
 
+    const backendStatusLabel = backendReadiness?.status === 'migration-failed'
+        ? 'Migration failed'
+        : backendReadiness?.status === 'fatal-error'
+            ? 'Backend error'
+            : backendReadiness?.status === 'starting'
+                ? 'Starting backend'
+                : backendConnectionState === 'connected'
+                    ? 'Connected'
+                    : backendConnectionState === 'reconnecting'
+                        ? 'Reconnecting'
+                        : backendConnectionState === 'backend-unavailable'
+                            ? 'Backend unavailable'
+                            : 'Disconnected';
+
+    const backendStatusClassName = backendReadiness?.status === 'ready' && backendConnectionState === 'connected'
+        ? 'border-emerald-700/70 bg-emerald-950/40 text-emerald-300'
+        : backendReadiness?.status === 'starting' || backendConnectionState === 'reconnecting'
+            ? 'border-amber-700/70 bg-amber-950/40 text-amber-300'
+            : 'border-red-800/70 bg-red-950/40 text-red-300';
+
+    const modalFallback = (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-gray-300 shadow-2xl">
+                Loading…
+            </div>
+        </div>
+    );
+
     useEffect(() => {
-        Promise.all([api.repos.list(), api.agents.list(), api.credentials.list(), api.mdfiles.list(), api.settings.get()])
-            .then(([repos, agents, credentials, mdFiles, settings]) => {
-                setRepos(repos); setAgents(agents); setCredentials(credentials); setSettings(settings);
-                // Only load files belonging to the currently selected repo to prevent cross-repo pollution
+        let cancelled = false;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const bootstrap = async () => {
+            try {
+                const readiness = await api.system.readiness();
+                if (cancelled) return;
+                setBackendReadiness(readiness);
+
+                if (readiness.status !== 'ready') {
+                    retryTimer = setTimeout(bootstrap, 2_000);
+                    return;
+                }
+
+                const [repos, agents, credentials, mdFiles, settings] = await Promise.all([
+                    api.repos.list(),
+                    api.agents.list(),
+                    api.credentials.list(),
+                    api.mdfiles.list(),
+                    api.settings.get(),
+                ]);
+
+                if (cancelled) return;
+                setRepos(repos);
+                setAgents(agents);
+                setCredentials(credentials);
+                setSettings(settings);
                 const currentRepoId = useAppStore.getState().selectedRepo?.id ?? null;
                 setMdFiles(mdFiles.filter((f) => f.scope === 'central' || (currentRepoId !== null && f.scope === 'repo' && f.repo_id === currentRepoId)));
-            })
-            .catch(console.error);
-        api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
-    }, [setRepos, setAgents, setCredentials, setMdFiles, setSettings]);
+                api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { });
+            } catch (error) {
+                if (cancelled) return;
+                setBackendReadiness({
+                    status: 'fatal-error',
+                    db: 'failed',
+                    migrations: 'failed',
+                    message: error instanceof Error ? error.message : 'Backend unavailable',
+                    timestamp: new Date().toISOString(),
+                });
+                setBackendConnectionState('backend-unavailable');
+                retryTimer = setTimeout(bootstrap, 2_000);
+            }
+        };
+
+        void bootstrap();
+
+        return () => {
+            cancelled = true;
+            if (retryTimer) clearTimeout(retryTimer);
+        };
+    }, [setAgents, setBackendConnectionState, setBackendReadiness, setCredentials, setMdFiles, setRepos, setSettings]);
+
+    useEffect(() => {
+        if (backendConnectionState === 'connected' || backendReadiness?.status !== 'ready') {
+            return;
+        }
+
+        let cancelled = false;
+        const interval = setInterval(() => {
+            void api.system.readiness()
+                .then((readiness) => {
+                    if (cancelled) return;
+                    setBackendReadiness(readiness);
+                })
+                .catch((error) => {
+                    if (cancelled) return;
+                    setBackendReadiness({
+                        status: 'fatal-error',
+                        db: 'failed',
+                        migrations: 'failed',
+                        message: error instanceof Error ? error.message : 'Backend unavailable',
+                        timestamp: new Date().toISOString(),
+                    });
+                });
+        }, 2_000);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [backendConnectionState, backendReadiness?.status, setBackendReadiness]);
 
     useEffect(() => {
         if (!selectedRepo) return;
@@ -243,22 +394,27 @@ export default function AppShell() {
                 }
                 return;
             }
-            // Ctrl+3 — Git history, Ctrl+4 — Search logs, Ctrl+5 — Open in VS Code
+            // Ctrl+3 — Recent changes, Ctrl+4 — Git history, Ctrl+5 — Search logs, Ctrl+6 — Open in VS Code
             if (event.key === '3' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+                event.preventDefault();
+                setShowChanges(true);
+                return;
+            }
+            if (event.key === '4' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 if (canShowGitHistory) {
                     event.preventDefault();
                     setShowGitHistory(true);
                 }
                 return;
             }
-            if (event.key === '4' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+            if (event.key === '5' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 if (selectedSession) {
                     event.preventDefault();
                     setShowLogSearch(true);
                 }
                 return;
             }
-            if (event.key === '5' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
+            if (event.key === '6' && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey) {
                 if (canOpenTargetInVsCode) {
                     event.preventDefault();
                     void openSelectedContextInVsCode();
@@ -281,7 +437,31 @@ export default function AppShell() {
     return (
         <div className="flex h-screen flex-col bg-gray-950 text-gray-100 overflow-hidden">
             <header className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-4 py-2.5 border-b border-gray-800/80 bg-gray-950/40 shrink-0">
-                <div className="min-w-0" />
+                <div className="min-w-0 flex items-center justify-start">
+                    {tokenUsageEnabled && (
+                        <div className={toolbarBoxCls}>
+                            <button
+                                onClick={() => { setShowUsage(true); void loadUsage(); }}
+                                title={selectedRepo ? `Token usage for ${selectedRepo.name}` : 'Token usage across all repositories'}
+                                className="inline-flex items-center gap-2 group"
+                            >
+                                <span
+                                    className={`${iconBtnBase} ${showUsage
+                                        ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
+                                        : 'bg-gray-800 border-gray-700 text-gray-300 group-hover:bg-gray-750 group-hover:text-white group-hover:border-gray-600'
+                                        }`}
+                                >
+                                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 19h16M7 15l3-3 2 2 5-6" />
+                                    </svg>
+                                </span>
+                                <span className="text-sm font-semibold text-gray-200 tabular-nums group-hover:text-white transition-colors">
+                                    {usageLoading ? '…' : formatTokenUsage(usageSummary?.totals.total_tokens ?? 0)}
+                                </span>
+                            </button>
+                        </div>
+                    )}
+                </div>
                 <div className="flex items-center justify-center">
                     <div className={toolbarBoxCls}>
                         {/* ── View toggle: Terminal / Editor / Diff ── */}
@@ -354,11 +534,20 @@ export default function AppShell() {
                                 </svg>
                             </button>
                             <button
+                                onClick={() => setShowChanges(true)}
+                                title="Recent changes (Ctrl+3)"
+                                className={iconBtnDefault}
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h10" />
+                                </svg>
+                            </button>
+                            <button
                                 onClick={() => setShowGitHistory(true)}
                                 title={canShowGitHistory
                                     ? selectedSession
-                                        ? `Git history for ${selectedSession.name} (Ctrl+3)`
-                                        : `Git history for ${gitContextRepo?.name} (Ctrl+3)`
+                                        ? `Git history for ${selectedSession.name} (Ctrl+4)`
+                                        : `Git history for ${gitContextRepo?.name} (Ctrl+4)`
                                     : 'Select a git repository to view history'}
                                 className={`${iconBtnBase} ${canShowGitHistory
                                     ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
@@ -375,7 +564,7 @@ export default function AppShell() {
                             </button>
                             <button
                                 onClick={() => setShowLogSearch(true)}
-                                title={selectedSession ? `Search logs for ${selectedSession.name} (Ctrl+4)` : 'Select a session to search its logs'}
+                                title={selectedSession ? `Search logs for ${selectedSession.name} (Ctrl+5)` : 'Select a session to search its logs'}
                                 disabled={!selectedSession}
                                 className={`${iconBtnBase} ${selectedSession
                                     ? 'bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-750 hover:text-white hover:border-gray-600'
@@ -391,8 +580,8 @@ export default function AppShell() {
                                     onClick={() => { if (canOpenTargetInVsCode) void openSelectedContextInVsCode(); }}
                                     title={canOpenTargetInVsCode
                                         ? (selectedSession
-                                            ? `Open ${selectedSession.name} worktree in VS Code (Ctrl+5)`
-                                            : `Open ${gitContextRepo?.name} in VS Code (Ctrl+5)`)
+                                            ? `Open ${selectedSession.name} worktree in VS Code (Ctrl+6)`
+                                            : `Open ${gitContextRepo?.name} in VS Code (Ctrl+6)`)
                                         : 'Select a repository or session to open in VS Code'}
                                     disabled={!canOpenTargetInVsCode}
                                     className={`${iconBtnBase} ${canOpenTargetInVsCode
@@ -500,29 +689,12 @@ export default function AppShell() {
                 </div>
 
                 <div className="min-w-0 flex items-center justify-end">
-                    {tokenUsageEnabled && (
-                        <div className={toolbarBoxCls}>
-                            <button
-                                onClick={() => { setShowUsage(true); void loadUsage(); }}
-                                title={selectedRepo ? `Token usage for ${selectedRepo.name}` : 'Token usage across all repositories'}
-                                className="inline-flex items-center gap-2 group"
-                            >
-                                <span
-                                    className={`${iconBtnBase} ${showUsage
-                                        ? 'bg-orange-600/90 border-orange-500 text-white shadow-sm shadow-orange-950/60'
-                                        : 'bg-gray-800 border-gray-700 text-gray-300 group-hover:bg-gray-750 group-hover:text-white group-hover:border-gray-600'
-                                        }`}
-                                >
-                                    <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 19h16M7 15l3-3 2 2 5-6" />
-                                    </svg>
-                                </span>
-                                <span className="text-sm font-semibold text-gray-200 tabular-nums group-hover:text-white transition-colors">
-                                    {usageLoading ? '…' : formatTokenUsage(usageSummary?.totals.total_tokens ?? 0)}
-                                </span>
-                            </button>
+                    <div className="flex items-center gap-3">
+                        <div className={`${toolbarBoxCls} border ${backendStatusClassName}`} title={backendReadiness?.message ?? backendStatusLabel}>
+                            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-current opacity-80" />
+                            <span className="text-xs font-medium tracking-wide uppercase">{backendStatusLabel}</span>
                         </div>
-                    )}
+                    </div>
                 </div>
             </header>
 
@@ -613,39 +785,48 @@ export default function AppShell() {
                 </div>
             </div>
 
-            {showCredentials && <CredentialsModal onClose={() => setShowCredentials(false)} />}
-            {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-            {showPipeline && <PipelineModal onClose={() => setShowPipeline(false)} onNodesChanged={syncTokenUsageEnabled} />}
+            {showCredentials && <Suspense fallback={modalFallback}><CredentialsModal onClose={() => setShowCredentials(false)} /></Suspense>}
+            {showSettings && <Suspense fallback={modalFallback}><SettingsModal onClose={() => setShowSettings(false)} /></Suspense>}
+            {showPipeline && <Suspense fallback={modalFallback}><PipelineModal onClose={() => setShowPipeline(false)} onNodesChanged={syncTokenUsageEnabled} /></Suspense>}
             {showUsage && (
-                <UsageModal
-                    repoName={selectedRepo?.name ?? null}
-                    summary={usageSummary}
-                    loading={usageLoading}
-                    error={usageError}
-                    onRefresh={() => { void loadUsage(); }}
-                    onClose={() => setShowUsage(false)}
-                />
+                <Suspense fallback={modalFallback}>
+                    <UsageModal
+                        repoName={selectedRepo?.name ?? null}
+                        summary={usageSummary}
+                        loading={usageLoading}
+                        error={usageError}
+                        onRefresh={() => { void loadUsage(); }}
+                        onClose={() => setShowUsage(false)}
+                    />
+                </Suspense>
             )}
             {showInstallTools && (
-                <InstallToolsModal onClose={() => { setShowInstallTools(false); api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { }); }} />
+                <Suspense fallback={modalFallback}>
+                    <InstallToolsModal onClose={() => { setShowInstallTools(false); api.tools.status().then((r) => setToolsAnyMissing(r.anyMissing)).catch(() => { }); }} />
+                </Suspense>
             )}
             {showGitHistory && gitContextRepo && gitContextRepo.is_git_repo && (
-                <GitHistoryModal
-                    repo={gitContextRepo}
-                    session={selectedSession}
-                    onClose={() => setShowGitHistory(false)}
-                />
+                <Suspense fallback={modalFallback}>
+                    <GitHistoryModal
+                        repo={gitContextRepo}
+                        session={selectedSession}
+                        onClose={() => setShowGitHistory(false)}
+                    />
+                </Suspense>
             )}
-            {showLogs && <LogsModal onClose={() => setShowLogs(false)} />}
+            {showLogs && <Suspense fallback={modalFallback}><LogsModal onClose={() => setShowLogs(false)} /></Suspense>}
             {showLogSearch && selectedSession && (
-                <LogSearchModal
-                    repo={repos.find((r) => r.id === selectedSession.repo_id) ?? { id: selectedSession.repo_id, name: '', path: '', source: 'local', git_url: null, created_at: '', is_git_repo: false }}
-                    session={selectedSession}
-                    onClose={() => setShowLogSearch(false)}
-                />
+                <Suspense fallback={modalFallback}>
+                    <LogSearchModal
+                        repo={repos.find((r) => r.id === selectedSession.repo_id) ?? { id: selectedSession.repo_id, name: '', path: '', source: 'local', git_url: null, created_at: '', is_git_repo: false }}
+                        session={selectedSession}
+                        onClose={() => setShowLogSearch(false)}
+                    />
+                </Suspense>
             )}
             {showPrompts && <PromptPanel onClose={() => setShowPrompts(false)} />}
-            {showAutomation && <AutomationModal onClose={() => setShowAutomation(false)} />}
+            {showAutomation && <Suspense fallback={modalFallback}><AutomationModal onClose={() => setShowAutomation(false)} /></Suspense>}
+            {showChanges && <Suspense fallback={modalFallback}><ChangesModal onClose={() => setShowChanges(false)} onOpenChange={openChangeEvent} /></Suspense>}
             <ToastContainer />
         </div>
     );

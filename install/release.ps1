@@ -11,7 +11,7 @@
       4. Clears previous release output so stale artifacts do not remain.
       5. Packages the Electron release artifacts via electron-builder.
       6. Organizes the output into `install/release/executable` and `install/release/installation`.
-      7. Copies the repo README into both output folders.
+      7. Copies the repo README and user guide into both output folders.
 
     The finished release artifacts are placed under install/release.
 #>
